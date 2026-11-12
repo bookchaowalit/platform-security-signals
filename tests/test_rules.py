@@ -174,6 +174,17 @@ class Partial(unittest.TestCase):
         self.assertIn('SIG-01:habits', [r['id'] for r in process_source(s, 'gw', {b(13): []})[1]])
 
 
+class QuietNeedsCompleteHour(unittest.TestCase):  # review P2 on b76d295
+    def test_empty_cut_buckets_then_one_clean_empty_bucket_is_not_an_hour_of_silence(self):
+        s = State.new()
+        day = 96
+        run(s, 'fw', {n: [fw(action='skip')] for n in range(0, 4)}, baseline=True)
+        run(s, 'fw', {n: [] for n in range(4, day)}, baseline=True)
+        process_source(s, 'fw', {b(n): [] for n in range(day, day + 3)}, partial={b(n) for n in range(day, day + 3)})
+        opened, _ = process_source(s, 'fw', {b(day + 3): []})  # next run, one clean empty bucket
+        self.assertEqual(opened, [])
+
+
 class Engine(unittest.TestCase):
     def test_baseline_run_opens_nothing(self):  # R4
         s = State.new()

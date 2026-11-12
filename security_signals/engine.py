@@ -50,6 +50,7 @@ def process_source(state, source, bucket_rows, baseline=False, partial=()):
         rules.ingest(state, source, bucket, rows)
         active = [] if baseline else rules.evaluate(state, source, bucket, rows)
         cut = bucket in partial
+        state.put('partial', source, bucket, 1 if cut else 0)  # kept across runs for the 1-hour window
         quiet = not baseline and not cut and rules.gone_quiet(state, source, bucket)
         if quiet:
             active.append(rules.sig('SIG-07', source, SIG07_SEVERITY, f'{source} has had no rows for 1 h'))

@@ -191,7 +191,9 @@ def after(state, source, bucket, rows):
 
 # -- SIG-07 ---------------------------------------------------------------------------------------
 def gone_quiet(state, source, bucket):
-    """No rows for an hour where the same hour on any of the previous 7 days had some."""
+    """No rows for a complete hour where the same hour on any of the previous 7 days had some."""
+    if state.total('partial', source, bucket - 3 * BUCKET, bucket) > 0:  # an empty cut bucket proves nothing
+        return False
     if state.total('src_total', source, bucket - 3 * BUCKET, bucket) > 0:
         return False
     for d in range(1, 8):

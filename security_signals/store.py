@@ -15,6 +15,7 @@ RETENTION = {
     'ip_429': 4,
     'src_total': 8 * DAY,   # SIG-07 same hour on the previous 7 days
     'bypass': DAY,          # SIG-05 per day
+    'partial': 4,           # cut buckets of the last hour, so SIG-07 "quiet" never judges an incomplete window
 }
 SEEN_RETENTION = 30 * DAY
 MAX_PENDING = 5

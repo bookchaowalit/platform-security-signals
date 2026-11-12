@@ -101,16 +101,16 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False):
             opened += source_failed(state, source, end - BUCKET, str(exc))
             status[source] = 'failed'
             continue
-        # Never move the cursor past a slice that was not pulled; it is pulled again next run.
-        skipped = getattr(fn, 'skipped', [])
-        limit = min([end, *(a // BUCKET * BUCKET for a, _ in skipped)])
-        partial = _buckets_in(getattr(fn, 'partial', []))
-        bucket_rows = {b: [] for b in range(start, limit, BUCKET)}
+        # Cut pages and skipped slices make their buckets partial: rows already pulled there are kept and
+        # evaluated, nothing resolves from them, and the cursor still moves on. Stalling the cursor would let
+        # a flood in one bucket blind every later bucket (security review on b76d295).
+        partial = _buckets_in([*getattr(fn, 'partial', []), *getattr(fn, 'skipped', [])])
+        bucket_rows = {b: [] for b in range(start, end, BUCKET)}
         allow = own.for_source(source) if own else None
         kept = drop_self([r for _, r in pulled], allow) if allow else [r for _, r in pulled]
         kept_ids = {id(r) for r in kept}
         for b, r in pulled:
-            if start <= b < limit and id(r) in kept_ids:
+            if start <= b < end and id(r) in kept_ids:
                 bucket_rows[b].append(r)
         cut = getattr(fn, 'truncated', 0)
         capacity = f'SIG-07:{source}-capacity'

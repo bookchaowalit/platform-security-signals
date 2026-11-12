@@ -47,7 +47,7 @@ class Cloudflare:
         self.token, self.zone, self.account, self.key, self.opener = token, zone_id, account_id, key, opener
         self.truncated = 0  # full pages kept without splitting further (flood or request budget)
         self.partial = []  # [(start, end)] kept full pages: counts there are a lower bound
-        self.skipped = []  # [(start, end)] never pulled (request budget): must be pulled again
+        self.skipped = []  # [(start, end)] never pulled (request budget): their buckets count as partial
 
     def _gql(self, query, variables):
         data = _post(CF_GRAPHQL, {'Authorization': f'Bearer {self.token}'}, {'query': query, 'variables': variables},
@@ -64,7 +64,7 @@ class Cloudflare:
         open SIG-03) and counted in `truncated`.
         """
         budget = budget if budget is not None else [CF_MAX_REQUESTS]
-        if budget[0] <= 0:  # out of requests: recorded, so the run stops its cursor before this slice
+        if budget[0] <= 0:  # out of requests: recorded, so the run treats these buckets as partial
             self.truncated += 1
             self.skipped.append((start, end))
             return []
