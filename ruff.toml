@@ -1,0 +1,6 @@
+# Correctness-focused set, the same as the bookchaowalit Python platform repos.
+target-version = "py313"
+line-length = 120
+
+[lint]
+select = ["E9", "F", "I", "UP", "B"]

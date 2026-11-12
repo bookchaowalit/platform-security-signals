@@ -1,0 +1,70 @@
+"""Open/resolve bookkeeping per source (SPEC-001 R4, R5, R6).
+
+Every rule reads exactly one source, so each source runs on its own cursor: a failed source leaves its
+signals and cursor untouched while the others carry on.
+"""
+from . import rules
+from .model import BUCKET
+
+SIG07_SEVERITY = 'medium'
+
+
+def _rules_of(source):
+    return [r for r, (src, _) in rules.RULES.items() if src == source]
+
+
+def _hold(rule):
+    return rules.RULES[rule][1] if rule in rules.RULES else 1
+
+
+def _open(state, s, bucket, opened):
+    known = state.signals.get(s['id'])
+    if known is None:
+        state.signals[s['id']] = {k: v for k, v in s.items() if k != 'ip'} | {'opened': bucket, 'last_active': bucket}
+        opened.append(s)
+    else:
+        known['last_active'] = bucket
+        if s['severity'] != known['severity']:
+            known['severity'] = s['severity']
+
+
+def _resolve(state, sid, resolved):
+    s = state.signals.pop(sid)
+    if sid in state.acks:
+        state.acks.remove(sid)
+    resolved.append({k: v for k, v in s.items() if k not in ('opened', 'last_active')} | {'id': sid})
+
+
+def process_source(state, source, bucket_rows, baseline=False):
+    """bucket_rows: {bucket start: [normalized rows]} for every bucket in the pulled range, empty ones included.
+
+    Returns (opened, resolved): opened signals may carry the raw `ip` for the message only.
+    """
+    opened, resolved = [], []
+    mine = set(_rules_of(source))
+    for bucket in sorted(bucket_rows):
+        rows = bucket_rows[bucket]
+        state.first.setdefault(source, bucket)
+        rules.ingest(state, source, bucket, rows)
+        active = [] if baseline else rules.evaluate(state, source, bucket, rows)
+        quiet = not baseline and rules.gone_quiet(state, source, bucket)
+        if quiet:
+            active.append(rules.sig('SIG-07', source, SIG07_SEVERITY, f'{source} has had no rows for 1 h'))
+        for s in active:
+            _open(state, s, bucket, opened)
+        for sid, s in list(state.signals.items()):
+            if s['rule'] in mine and (sid in state.acks or bucket - s['last_active'] >= _hold(s['rule']) * BUCKET):
+                _resolve(state, sid, resolved)
+        sig07 = f'SIG-07:{source}'
+        if not quiet and sig07 in state.signals:
+            _resolve(state, sig07, resolved)  # a good pull ends a failure at once
+        rules.after(state, source, bucket, rows)
+        state.cursors[source] = bucket
+    return opened, resolved
+
+
+def source_failed(state, source, bucket, error_kind):
+    """The pull failed: keep the source's signals and cursor (R5), open SIG-07 once."""
+    opened = []
+    _open(state, rules.sig('SIG-07', source, SIG07_SEVERITY, f'{source} pull failed ({error_kind})'), bucket, opened)
+    return opened

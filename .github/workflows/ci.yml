@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # Shared Python CI: Ruff (ruff.toml) and the unittest suite. The package is standard library
+  # only, so there is nothing to install or lock, and no type checker config yet.
+  python:
+    uses: bookchaowalit/platform-ci-workflows/.github/workflows/ci-python.yml@b9957cccb3cc202e9e1a08df01924b8270d796df # v1.6.3
+    with:
+      python-version: "3.13"
+      format-check: false # follow-up: adopt ruff format
+      typecheck-command: ""
+      test-command: python -m unittest discover -s tests -t . -v
+
+  security:
+    uses: bookchaowalit/platform-ci-workflows/.github/workflows/security.yml@b9957cccb3cc202e9e1a08df01924b8270d796df # v1.6.3

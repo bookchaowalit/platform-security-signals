@@ -1,0 +1,154 @@
+---
+title: "SPEC-001 Security signals: attack detection on the edge, gateway and identity"
+status: draft-for-review
+created: 2026-11-12
+owner: bookchaowalit
+plan: knowledge store plans/security-gaps/PLAN.md (WS2)
+evidence: knowledge store plans/security-gaps/SPIKE-WS2.md
+description: Every 15 minutes, read security-relevant counts from Cloudflare, Railway gateway logs and identity, keep them in R2 and alert once when an attack pattern opens or resolves.
+---
+
+# SPEC-001 Security signals
+
+## Problem
+
+Protection is layered (WAF custom rule, rate limit, gateway RS256 + origin lock, Access, posture
+monitor, uptime, Sentry), but nothing watches for attacks. Uptime catches "down", Sentry catches
+"error", posture-monitor catches "misconfigured". Nobody sees "someone is trying to get in".
+
+The spike on 2026-11-12 found, in 24 hours: 424 blocked requests on the zone (WAF custom 267,
+rate limit 135, managed 14) from 32 IPs in 12 countries, mostly probing `/.git`, `/.env` and
+`/.github`; and on the gateway 112 × 401, 16 × 403 and 377 × 429. The data exists. Nobody reads it.
+
+## Outcome
+
+Every 15 minutes a job collects counts from four sources, stores them in R2, evaluates rules
+SIG-00…SIG-07 and sends one Telegram message only when a signal opens or resolves. Each change is
+also a `security-api` audit event. A missed or silent run alerts through the uptime Worker
+heartbeat `security-signals`.
+
+## Sources (verified in the spike)
+
+| Source | API | Limits found |
+|---|---|---|
+| `cf-firewall` | Cloudflare GraphQL `firewallEventsAdaptive` (raw rows) | Free plan: raw rows only (`firewallEventsAdaptiveGroups` is refused), ≥ 30 days look-back, 10 000 rows per query |
+| `cf-http` | Cloudflare GraphQL `httpRequestsAdaptiveGroups`, host `gateway.bookchaowalit.com`, status ≥ 400, by status × clientIP × country | ≥ 8 days look-back |
+| `cf-access` | Cloudflare GraphQL `accessLoginRequestsAdaptiveGroups` (account) by isSuccessfulLogin × country × deviceId × appId | one query may span at most 1 week |
+| `gw-app` | Railway GraphQL `environmentLogs(filter:"@event:request.completed")` on project `platform-api-gateway`, attributes `status route system subject_hash` | ~1 000 lines ≈ 9 h per call; page by `beforeDate` |
+| `idp` | Railway logs of identity, event `token.issue_failed` | **does not exist yet**: identity change in this spec (R9) |
+
+## Rules (v1)
+
+All windows are evaluated on 15-minute buckets. Self traffic (SIG-00) is removed before any other rule.
+
+| ID | Signal | Source | Opens when | Resolves when | Severity |
+|---|---|---|---|---|---|
+| SIG-00 | self-traffic filter (not alerting) | all | an IP is in the allowlist: GitHub Actions ranges from `https://api.github.com/meta`, `SIGNALS_SELF_IPS` secret (Railway egress, Worker egress, home IP) | — | — |
+| SIG-01 | auth failure spike | `gw-app` + `cf-http` | 401+403 on one `system` in 15 min ≥ 50 **and** ≥ 5× its 7-day 15-min mean | 4 buckets in a row below the open threshold | high |
+| SIG-02 | token brute force | `cf-http` | one non-self IP-hash gets ≥ 30 × 429 or ≥ 30 × 401 on the gateway within 1 h | 1 h without it | high |
+| SIG-03 | scanning / WAF surge | `cf-firewall` | ≥ 200 blocks in 15 min, **or** blocks on a host that had none in the previous 30 days | 4 quiet buckets | medium |
+| SIG-04 | new Access login origin | `cf-access` | a successful login from a country or deviceId not seen in the 30-day baseline (R2) | operator acknowledges via state file, or 7 days | high |
+| SIG-05 | gateway bypass | `gw-app` + service logs | any direct call (assertion missing) to a service in `enforce`, or > 0 per day on a service in `report` (fed by WS3) | 24 h without it | medium (`enforce`: high) |
+| SIG-06 | identity failures | `idp` | ≥ 20 `token.issue_failed` in 15 min, or a `client_id` not seen in 30 days | 4 quiet buckets | high |
+| SIG-07 | collector silent | all | a source returns an error or zero rows where it had > 0 in the same hour of the previous 7 days, for 1 h | next good pull | medium |
+
+Signal id: `<rule>:<subject>` (subject = system, host, IP-hash, country or client_id hash), so one
+attacker on two systems is two signals and repeated pulls of the same attack do not re-alert.
+
+## Requirements
+
+- **R1 Read-only.** Cloudflare token `CF_SIGNALS_TOKEN` holds only Account Analytics Read,
+  Access: Audit Logs Read and Zone Analytics Read on bookchaowalit.com (owner action O-6). Railway
+  access uses project tokens of the gateway and identity projects (O-7); if the owner accepts the
+  account token instead, that is recorded as an accepted risk in the ADR. R2 credentials cover one
+  bucket, `security-signals`. The job never changes any system.
+- **R2 Public log stays quiet.** The repository is public. Job log and step summary print only
+  counts per source and rule and the exit status. No IP, IP-hash, path, host, country,
+  subject or client id. Details go only to Telegram and to `security-api`.
+- **R3 Personal data (PDPA).** IPs are stored as HMAC-SHA256 with key `SIGNALS_IP_KEY`
+  (Infisical `/security-signals`). Raw IPs are kept only under `raw-ip/` for 7 days for
+  investigation if the owner chooses D-2 = keep; otherwise never written. The Telegram message
+  shows the raw IP only for SIG-02/SIG-04, so the owner can block it. Bronze retention 90 days
+  (R2 lifecycle rule), state and baselines kept.
+- **R4 Alert on change.** One message per run listing opened signals highest severity first
+  and resolved ones; nothing when nothing changed. The first run (no state) sends one baseline
+  message with counts per rule and writes baselines; it does not open signals.
+- **R5 Fail loudly, never resolve on failure.** If any source fails, its rules are skipped,
+  their open signals stay open, the other sources still run, SIG-07 counts the failure,
+  the heartbeat reports `ok: false` and the run exits 2. A partial pull never resolves a signal.
+- **R6 Bounded and incremental.** Each source keeps a cursor (last bucket end) in R2 and
+  pulls only new 15-minute buckets, at most 24 h back after an outage (firewall and Access
+  allow 7 days; the job never asks Access for more than 1 week). Each call 20 s timeout. A run
+  finishes within 3 minutes.
+- **R7 Standard library only,** as posture-monitor and vuln-digest. Python 3.12, `urllib`, `hmac`.
+- **R8 Undelivered alerts are kept.** A message Telegram refused stays in the state and is sent
+  first next run; the run exits 3. An audit event `security-api` refused is retried the same way.
+- **R9 Identity event.** `platform-identity` emits one stdout JSON line per failed token request:
+  `{"event":"token.issue_failed","grant_type":…,"reason":<invalid_client|invalid_grant|invalid_scope|unauthorized_client|rate_limited>,"client_hash":<HMAC of client_id>}`.
+  No secret, assertion, scope list or IP. Done in its own worktree with its own SPEC entry and tests;
+  the gateway needs no change (spike).
+- **R10 Runs from the jobs Worker.** Job `security-signals` in `platform-jobs-worker`
+  (`*/15 * * * *`) dispatches the GitHub workflow; the workflow has no `schedule:` of its own
+  (Workers Free allows 5 cron triggers per account; ADR-0008).
+- **R11 Audit.** Each opened or resolved signal is one `security-api` `/v1/audit` event
+  (`signal.opened|resolved`, target `<rule>.<subject>`), via the gateway with the service client
+  `security-signals` (identity `client_credentials`, scope `audit:write`).
+
+## Storage layout (R2 bucket `security-signals`)
+
+```
+bronze/<source>/dt=YYYY-MM-DD/<bucket-end>.jsonl   # aggregated counts only, IP hashed (90 d)
+raw-ip/dt=YYYY-MM-DD/<bucket-end>.jsonl            # only if D-2 = keep (7 d)
+state/cursors.json                                  # last bucket per source
+state/signals.json                                  # open signals + undelivered messages
+state/baselines.json                                # 7-day means, 30-day seen countries/devices/hosts/clients
+```
+
+## Acceptance criteria
+
+- AC1 SIG-00: an event from a GitHub Actions range or a `SIGNALS_SELF_IPS` address never counts toward any rule.
+- AC2 SIG-01 opens only when both the absolute (≥ 50) and relative (≥ 5× mean) thresholds hold; it resolves after 4 buckets below.
+- AC3 SIG-02: 30 × 401 from one non-self IP within 1 h opens one signal; the same IP in the next pull does not re-alert.
+- AC4 SIG-03: 250 blocks on `/.env` in 15 min opens a signal; blocks on a host first seen today open one even below 200.
+- AC5 SIG-04: a successful login from a new country opens a signal; a failed one does not.
+- AC6 SIG-07: a source that errors keeps its open signals open, opens SIG-07 and makes the run exit 2.
+- AC7 Diffing previous and current open signals yields exactly the opened and resolved sets; an unchanged set yields no message.
+- AC8 The public summary contains no IP, hash, path, host, country or subject.
+- AC9 Cursors make two runs over the same bucket produce the same bronze file and no duplicate signals (idempotent).
+- AC10 Access queries never span more than 7 days; after a 3-day outage the job catches up at most 24 h.
+- AC11 Live test (controlled): 30 requests with a forged token from one outside IP → SIG-02 in Telegram within 30 min; 250 requests to `/.env` → SIG-03; both resolve on their own.
+- AC12 Phase A done: 7 days with heartbeat ok and at most 1 false alert per day.
+
+## Test plan
+
+Unit tests per rule from fixtures captured in the spike shape (counts only, synthetic IPs);
+red/green log per ADR-0004. Contract tests for the four GraphQL/Railway query shapes with
+recorded responses. The live test AC11 runs from a laptop hotspot (outside every allowlist),
+announced in Telegram first.
+
+## Out of scope (v1)
+
+Blocking automatically (the job only reports; the owner adds WAF rules), Railway cell logs and
+GitHub signals (phase B), homelab logs (phase C), any always-on service, SIEM or BI server
+(ADR-0013), gateway code changes.
+
+## Open items
+
+- O-6 Cloudflare read-only token, O-7 Railway project tokens (owner).
+- D-2 keep raw IPs 7 days (recommended) or hashes only.
+- Thresholds are first guesses from one day of data; tune after the 7-day run (AC12) and record changes here.
+
+## Changes during build (2026-11-12)
+
+- SIG-06 "client not seen in 30 days" counts only failures where the client exists
+  (`invalid_grant`, `invalid_scope`, `unauthorized_client`). `invalid_client` comes from random ids an
+  attacker sends, and counting it would open one signal per guess. The surge rule still counts every reason.
+- SIG-02 and SIG-04 have a `hold` of 4 buckets and 7 days; SIG-05 one day; SIG-07 resolves on the next good pull.
+- Railway `environmentLogs` reads `beforeDate` as the lower bound and keeps the newest lines when a page is
+  full (5 000 lines; about 2 500 per day today). The collector asks from the range start and fails the source
+  when a full page does not reach back to it, so no lines are lost without notice.
+- An Access device id is often empty (no WARP); empty devices are not tracked.
+- Exit code 4 added for missing configuration.
+- First live dry run (24 h, no Telegram): 424 firewall rows, 858 gateway HTTP errors, 568 gateway app errors,
+  0 Access logins. A replay without baseline opened one SIG-02 from a Thai address (likely our own testing):
+  the home IP must be in `SIGNALS_SELF_IPS` before going live.

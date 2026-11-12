@@ -1,0 +1,83 @@
+# Security signals (docs/specs/001-security-signals.md): every 15 minutes pull new buckets from
+# Cloudflare (firewall events, gateway HTTP errors, Access logins) and Railway logs (gateway, identity),
+# evaluate SIG-00..SIG-07 and send a Telegram message only when a signal opens or resolves.
+#
+# Started by the jobs Worker (platform-jobs-worker job `security-signals`, */15) through
+# workflow_dispatch (ADR-0008, R10). Public repository: the log prints only counts per source and
+# rule; details go only to Telegram, state and bronze live in the private R2 bucket security-signals.
+# A failed or missed run alerts through the uptime Worker heartbeat `security-signals`.
+name: Security signals
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-signals
+  cancel-in-progress: false
+
+jobs:
+  signals:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      SIGNALS_R2_ENDPOINT: ${{ secrets.SIGNALS_R2_ENDPOINT }}
+      SIGNALS_R2_ACCESS_KEY_ID: ${{ secrets.SIGNALS_R2_ACCESS_KEY_ID }}
+      SIGNALS_R2_SECRET_ACCESS_KEY: ${{ secrets.SIGNALS_R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Signals
+        id: run
+        env:
+          SIGNALS_IP_KEY: ${{ secrets.SIGNALS_IP_KEY }}
+          SIGNALS_SELF_IPS: ${{ secrets.SIGNALS_SELF_IPS }}
+          SIGNALS_KEEP_RAW_IP: ${{ vars.SIGNALS_KEEP_RAW_IP }}
+          SIGNALS_CF_TOKEN: ${{ secrets.SIGNALS_CF_TOKEN }}
+          SIGNALS_CF_ZONE_ID: ${{ secrets.SIGNALS_CF_ZONE_ID }}
+          SIGNALS_CF_ACCOUNT_ID: ${{ secrets.SIGNALS_CF_ACCOUNT_ID }}
+          SIGNALS_RAILWAY_TOKEN: ${{ secrets.SIGNALS_RAILWAY_TOKEN }}
+          SIGNALS_RAILWAY_GW_TOKEN: ${{ secrets.SIGNALS_RAILWAY_GW_TOKEN }}
+          SIGNALS_RAILWAY_IDP_TOKEN: ${{ secrets.SIGNALS_RAILWAY_IDP_TOKEN }}
+          SIGNALS_GW_ENV_ID: ${{ secrets.SIGNALS_GW_ENV_ID }}
+          SIGNALS_IDP_ENV_ID: ${{ secrets.SIGNALS_IDP_ENV_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set +e
+          python -m security_signals.r2 get state/state.json "$RUNNER_TEMP/previous.json" 2> "$RUNNER_TEMP/stderr.log"
+          code=$?
+          if [ "$code" -eq 0 ]; then
+            # stdout is the counts-only summary; stderr stays in a runner temp file, out of the public log.
+            python -m security_signals --state-in "$RUNNER_TEMP/previous.json" --state-out "$RUNNER_TEMP/current.json" \
+              --bronze-dir "$RUNNER_TEMP/bronze" 2>> "$RUNNER_TEMP/stderr.log" | tee -a "$GITHUB_STEP_SUMMARY"
+            code=${PIPESTATUS[0]}
+          fi
+          # Bronze first, then state: a crash between them re-pulls the same buckets (same objects, AC9).
+          if [ -d "$RUNNER_TEMP/bronze" ]; then
+            python -m security_signals.r2 put-dir "$RUNNER_TEMP/bronze" 2>> "$RUNNER_TEMP/stderr.log" || code=2
+          fi
+          if [ -f "$RUNNER_TEMP/current.json" ]; then
+            python -m security_signals.r2 put state/state.json "$RUNNER_TEMP/current.json" 2>> "$RUNNER_TEMP/stderr.log" || code=2
+          fi
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Heartbeat
+        if: ${{ always() }}
+        env:
+          HEARTBEAT_TOKEN: ${{ secrets.HEARTBEAT_TOKEN }}
+          CODE: ${{ steps.run.outputs.exit_code }}
+        run: |
+          if [ "$CODE" = 0 ]; then body='{"ok":true,"failed":[]}'; else body='{"ok":false,"failed":["security-signals"]}'; fi
+          curl -fsS -X POST https://monitor.bookchaowalit.com/heartbeat/security-signals \
+            -H "Authorization: Bearer $HEARTBEAT_TOKEN" -H "Content-Type: application/json" -d "$body"
