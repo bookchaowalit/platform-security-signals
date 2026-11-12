@@ -176,3 +176,8 @@ Independent Codex review and the automated security review of 817db1d found six 
   slices now make their buckets partial too (rows kept and evaluated, nothing resolves) and the cursor moves
   on; the skipped rows are lost, and the capacity signal says so. SIG-07 "quiet" needs a complete hour: cut
   buckets are kept in state (`partial` series, 1 h) and any cut bucket in the window blocks the judgement.
+- Fourth round (0ce442a, security review): skipped slices were lost for good. Cloudflare pages are now split
+  breadth first and a split happens only while the budget still covers one request for every queued slice,
+  so every part of the window is queried at least once and nothing is skipped. Under a flood above 10 000
+  events per slice the counts stay a lower bound (partial buckets, capacity signal); a backfill of those
+  slices was considered and left out, because the sampled rows already open the signals that matter.

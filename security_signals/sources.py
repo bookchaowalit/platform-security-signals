@@ -47,7 +47,7 @@ class Cloudflare:
         self.token, self.zone, self.account, self.key, self.opener = token, zone_id, account_id, key, opener
         self.truncated = 0  # full pages kept without splitting further (flood or request budget)
         self.partial = []  # [(start, end)] kept full pages: counts there are a lower bound
-        self.skipped = []  # [(start, end)] never pulled (request budget): their buckets count as partial
+        self.skipped = []  # kept for the run's interface; breadth-first splitting never skips a slice
 
     def _gql(self, query, variables):
         data = _post(CF_GRAPHQL, {'Authorization': f'Bearer {self.token}'}, {'query': query, 'variables': variables},
@@ -56,33 +56,33 @@ class Cloudflare:
             raise ProviderError('graphql error')
         return data.get('data') or {}
 
-    def _zone_rows(self, query, field, start, end, extra=None, budget=None):
-        """Raw or grouped rows for [start, end); a full page splits the range in two.
+    def _zone_rows(self, query, field, start, end, extra=None):
+        """Raw or grouped rows for [start, end); a full page is split in two, breadth first.
 
-        A flood can fill even a 1-minute page. Failing the source then would blind exactly the rules
-        that should fire, so a page that cannot or may not be split is kept as is (10 000 blocks still
-        open SIG-03) and counted in `truncated`.
+        Every slice is queried at least once: a split happens only while the request budget still covers
+        one request for each slice waiting in the queue plus both halves. So a flood early in the window
+        cannot starve later slices (security review on 0ce442a), and nothing is skipped. A full page that
+        cannot be split further is kept as is (10 000 blocks still open SIG-03), counted in `truncated` and
+        listed in `partial`, so its buckets never resolve a signal.
         """
-        budget = budget if budget is not None else [CF_MAX_REQUESTS]
-        if budget[0] <= 0:  # out of requests: recorded, so the run treats these buckets as partial
-            self.truncated += 1
-            self.skipped.append((start, end))
-            return []
-        budget[0] -= 1
-        data = self._gql(query, {'z': self.zone, 'a': iso(start), 'b': iso(end), 'n': CF_LIMIT, **(extra or {})})
-        zones = (data.get('viewer') or {}).get('zones') or []
-        rows = (zones[0].get(field) if zones else None)
-        if rows is None:
-            raise ProviderError('no data')
-        if len(rows) >= CF_LIMIT:
-            if end - start <= 60 or budget[0] < 2:  # cannot split, or no budget for both halves
+        queue, done, left = [(start, end)], [], CF_MAX_REQUESTS
+        while queue:
+            a, b = queue.pop(0)
+            left -= 1
+            data = self._gql(query, {'z': self.zone, 'a': iso(a), 'b': iso(b), 'n': CF_LIMIT, **(extra or {})})
+            zones = (data.get('viewer') or {}).get('zones') or []
+            rows = zones[0].get(field) if zones else None
+            if rows is None:
+                raise ProviderError('no data')
+            if len(rows) >= CF_LIMIT:
+                if b - a > 60 and left >= len(queue) + 2:
+                    mid = (a + b) // 2
+                    queue += [(a, mid), (mid, b)]
+                    continue
                 self.truncated += 1
-                self.partial.append((start, end))
-                return rows
-            mid = (start + end) // 2
-            return (self._zone_rows(query, field, start, mid, extra, budget)
-                    + self._zone_rows(query, field, mid, end, extra, budget))
-        return rows
+                self.partial.append((a, b))
+            done.append((a, rows))
+        return [r for _, rows in sorted(done, key=lambda d: d[0]) for r in rows]
 
     def firewall(self, start, end):
         q = """query($z:String!,$a:Time!,$b:Time!,$n:Int!){viewer{zones(filter:{zoneTag:$z}){

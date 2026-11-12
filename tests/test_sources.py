@@ -73,6 +73,11 @@ class CloudflareFirewall(unittest.TestCase):
         cf.firewall(T0, T0 + 86_400)
         self.assertLessEqual(len(op.requests), CF_MAX_REQUESTS)
         self.assertGreater(cf.truncated, 0)
+        self.assertEqual(cf.skipped, [])
+        # breadth first: the kept slices tile the whole day, none left unqueried
+        covered = sorted(cf.partial)
+        self.assertEqual((covered[0][0], covered[-1][1]), (T0, T0 + 86_400))
+        self.assertTrue(all(x[1] == y[0] for x, y in zip(covered, covered[1:], strict=False)))
 
     def test_graphql_error_and_http_error_raise(self):
         with self.assertRaises(ProviderError):
