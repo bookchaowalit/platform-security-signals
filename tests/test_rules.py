@@ -161,6 +161,19 @@ class Sig07Silent(unittest.TestCase):  # AC6
         self.assertEqual(opened, ['SIG-07:fw'])
 
 
+class Partial(unittest.TestCase):
+    def test_partial_buckets_open_but_never_resolve(self):
+        s = State.new()
+        process_source(s, 'gw', {b(0): [gw(count=80)]})
+        opened, resolved = process_source(s, 'gw', {b(n): [] for n in range(1, 9)}, partial={b(n) for n in range(1, 9)})
+        self.assertEqual(resolved, [])
+        opened, _ = process_source(s, 'gw', {b(9): [gw(system='diary', count=60)]}, partial={b(9)})
+        self.assertEqual([o['id'] for o in opened], ['SIG-01:diary'])
+        # the hold counts from the last cut bucket: 3 clean buckets later it is still open, the 4th resolves
+        self.assertEqual(process_source(s, 'gw', {b(n): [] for n in range(10, 13)})[1], [])
+        self.assertIn('SIG-01:habits', [r['id'] for r in process_source(s, 'gw', {b(13): []})[1]])
+
+
 class Engine(unittest.TestCase):
     def test_baseline_run_opens_nothing(self):  # R4
         s = State.new()

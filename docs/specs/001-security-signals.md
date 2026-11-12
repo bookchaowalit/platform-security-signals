@@ -167,3 +167,8 @@ Independent Codex review and the automated security review of 817db1d found six 
 - A flood can fill a Cloudflare page. A page that cannot be split, or a split past the 24-request budget,
   is kept (or skipped) and reported as `SIG-07:<source>-capacity` and `truncated` in the summary, instead of
   failing the source and blinding the rules that should fire.
+- Second review round (929936b): a cut page must not count as calm. Buckets with a kept full page are
+  `partial`: signals may open there, nothing resolves, SIG-07 "quiet" is not judged, and open signals of
+  that source restart their hold from the last cut bucket. A slice skipped for the request budget stops
+  the cursor before it, so the next run pulls it again. `SIG-07:<source>-capacity` is `high` and stays open
+  until a pull without cuts.

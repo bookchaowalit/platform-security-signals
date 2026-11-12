@@ -117,6 +117,23 @@ class Runs(unittest.TestCase):
         _, _, _, _ = run(state, NOW + 2 * BUCKET, {'fw': collector()}, OWN, sent)
         self.assertIn('✅ SIG-07', sent[-1])
 
+    def test_cut_buckets_never_resolve_and_skipped_ones_hold_the_cursor(self):  # review P1 + security review
+        sent = Sent()
+        _, state, _, _ = run('', NOW, {'fw': collector()}, OWN, sent)
+        _, state, _, _ = run(state, NOW + BUCKET, {'fw': collector({b(200): [fw(count=300)]})}, OWN, sent)
+        self.assertIn('SIG-03:zone', State.load(state).signals)
+        later = NOW + 6 * BUCKET  # buckets 201..205
+        cut = collector({})
+        cut.truncated, cut.partial, cut.skipped = 2, [(b(201), b(204))], [(b(204), b(206))]
+        _, state, _, summary = run(state, later, {'fw': cut}, OWN, sent)
+        s = State.load(state)
+        self.assertIn('SIG-03:zone', s.signals)  # 3 empty-looking but cut buckets: not resolved
+        self.assertEqual(s.cursors['fw'], b(203))  # stops before the skipped slice
+        self.assertEqual(s.signals['SIG-07:fw-capacity']['severity'], 'high')
+        calls = []
+        run(state, later, {'fw': collector(calls=calls)}, OWN, sent)
+        self.assertEqual(calls[0][0], b(204))  # skipped slice pulled again
+
     def test_kept_message_has_no_raw_ip(self):  # review P1: R3
         def refuse(text):
             raise OSError('no')

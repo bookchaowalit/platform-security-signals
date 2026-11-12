@@ -35,9 +35,11 @@ def _resolve(state, sid, resolved):
     resolved.append({k: v for k, v in s.items() if k not in ('opened', 'last_active')} | {'id': sid})
 
 
-def process_source(state, source, bucket_rows, baseline=False):
+def process_source(state, source, bucket_rows, baseline=False, partial=()):
     """bucket_rows: {bucket start: [normalized rows]} for every bucket in the pulled range, empty ones included.
 
+    partial: buckets whose rows are a lower bound (a cut page). Signals may open there but nothing
+    resolves and SIG-07 "quiet" is not judged, because missing rows are not evidence of calm (R5).
     Returns (opened, resolved): opened signals may carry the raw `ip` for the message only.
     """
     opened, resolved = [], []
@@ -47,16 +49,21 @@ def process_source(state, source, bucket_rows, baseline=False):
         state.first.setdefault(source, bucket)
         rules.ingest(state, source, bucket, rows)
         active = [] if baseline else rules.evaluate(state, source, bucket, rows)
-        quiet = not baseline and rules.gone_quiet(state, source, bucket)
+        cut = bucket in partial
+        quiet = not baseline and not cut and rules.gone_quiet(state, source, bucket)
         if quiet:
             active.append(rules.sig('SIG-07', source, SIG07_SEVERITY, f'{source} has had no rows for 1 h'))
         for s in active:
             _open(state, s, bucket, opened)
         for sid, s in list(state.signals.items()):
-            if s['rule'] in mine and (sid in state.acks or bucket - s['last_active'] >= _hold(s['rule']) * BUCKET):
+            if s['rule'] not in mine:
+                continue
+            if cut:  # unknown is not calm: the hold restarts after the last cut bucket
+                s['last_active'] = bucket
+            elif sid in state.acks or bucket - s['last_active'] >= _hold(s['rule']) * BUCKET:
                 _resolve(state, sid, resolved)
         sig07 = f'SIG-07:{source}'
-        if not quiet and sig07 in state.signals:
+        if not quiet and not cut and sig07 in state.signals:
             _resolve(state, sig07, resolved)  # a good pull ends a failure at once
         rules.after(state, source, bucket, rows)
         state.cursors[source] = bucket

@@ -46,6 +46,8 @@ class Cloudflare:
     def __init__(self, token, zone_id, account_id, key, opener=urllib.request.urlopen):
         self.token, self.zone, self.account, self.key, self.opener = token, zone_id, account_id, key, opener
         self.truncated = 0  # full pages kept without splitting further (flood or request budget)
+        self.partial = []  # [(start, end)] kept full pages: counts there are a lower bound
+        self.skipped = []  # [(start, end)] never pulled (request budget): must be pulled again
 
     def _gql(self, query, variables):
         data = _post(CF_GRAPHQL, {'Authorization': f'Bearer {self.token}'}, {'query': query, 'variables': variables},
@@ -62,8 +64,9 @@ class Cloudflare:
         open SIG-03) and counted in `truncated`.
         """
         budget = budget if budget is not None else [CF_MAX_REQUESTS]
-        if budget[0] <= 0:  # out of requests: this slice is skipped and counted, never silently
+        if budget[0] <= 0:  # out of requests: recorded, so the run stops its cursor before this slice
             self.truncated += 1
+            self.skipped.append((start, end))
             return []
         budget[0] -= 1
         data = self._gql(query, {'z': self.zone, 'a': iso(start), 'b': iso(end), 'n': CF_LIMIT, **(extra or {})})
@@ -74,6 +77,7 @@ class Cloudflare:
         if len(rows) >= CF_LIMIT:
             if end - start <= 60 or budget[0] < 2:  # cannot split, or no budget for both halves
                 self.truncated += 1
+                self.partial.append((start, end))
                 return rows
             mid = (start + end) // 2
             return (self._zone_rows(query, field, start, mid, extra, budget)
@@ -117,6 +121,7 @@ class Cloudflare:
             raise ProviderError('no data')
         if len(rows) >= CF_LIMIT:
             self.truncated += 1  # kept: thousands of login groups is itself what SIG-04 should see
+            self.partial.append((start, end))
         out = []
         for r in rows:
             d = r['dimensions']

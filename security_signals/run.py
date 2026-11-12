@@ -25,7 +25,7 @@ def _capacity(state, source, bucket, cut):
     from .engine import _open
     from .rules import sig
     opened = []
-    _open(state, sig('SIG-07', f'{source}-capacity', 'medium',
+    _open(state, sig('SIG-07', f'{source}-capacity', 'high',
                      f'{source} hit the collector page limit {cut}× (flood?); counts are a lower bound'), bucket, opened)
     return opened
 
@@ -34,13 +34,22 @@ class Pull:
     """A collector call that also reports how many Cloudflare pages were cut (see Cloudflare._zone_rows)."""
 
     def __init__(self, fn, cf):
-        self.fn, self.cf, self.truncated = fn, cf, 0
+        self.fn, self.cf = fn, cf
+        self.truncated, self.partial, self.skipped = 0, [], []
 
     def __call__(self, start, end):
-        before = self.cf.truncated
+        t, p, s = self.cf.truncated, len(self.cf.partial), len(self.cf.skipped)
         rows = self.fn(start, end)
-        self.truncated = self.cf.truncated - before
+        self.truncated = self.cf.truncated - t
+        self.partial, self.skipped = self.cf.partial[p:], self.cf.skipped[s:]
         return rows
+
+
+def _buckets_in(ranges):
+    out = set()
+    for a, b in ranges:
+        out.update(range(a // BUCKET * BUCKET, b, BUCKET))
+    return out
 
 
 def bronze_files(source, bucket_rows, keep_raw_ip):
@@ -92,12 +101,16 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False):
             opened += source_failed(state, source, end - BUCKET, str(exc))
             status[source] = 'failed'
             continue
-        bucket_rows = {b: [] for b in range(start, end, BUCKET)}
+        # Never move the cursor past a slice that was not pulled; it is pulled again next run.
+        skipped = getattr(fn, 'skipped', [])
+        limit = min([end, *(a // BUCKET * BUCKET for a, _ in skipped)])
+        partial = _buckets_in(getattr(fn, 'partial', []))
+        bucket_rows = {b: [] for b in range(start, limit, BUCKET)}
         allow = own.for_source(source) if own else None
         kept = drop_self([r for _, r in pulled], allow) if allow else [r for _, r in pulled]
         kept_ids = {id(r) for r in kept}
         for b, r in pulled:
-            if start <= b < end and id(r) in kept_ids:
+            if start <= b < limit and id(r) in kept_ids:
                 bucket_rows[b].append(r)
         cut = getattr(fn, 'truncated', 0)
         capacity = f'SIG-07:{source}-capacity'
@@ -108,7 +121,7 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False):
             resolved.append(state.signals.pop(capacity) | {'id': capacity})
         rows_n[source] = sum(r.get('count', 1) for rs in bucket_rows.values() for r in rs)
         bronze.update(bronze_files(source, bucket_rows, keep_raw_ip))
-        o, r = process_source(state, source, bucket_rows, baseline=baseline)
+        o, r = process_source(state, source, bucket_rows, baseline=baseline, partial=partial)
         opened += o
         resolved += r
         status[source] = 'ok'
