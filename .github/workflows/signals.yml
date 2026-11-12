@@ -80,6 +80,9 @@ jobs:
           HEARTBEAT_TOKEN: ${{ secrets.HEARTBEAT_TOKEN }}
           CODE: ${{ steps.run.outputs.exit_code }}
         run: |
+          # Every heartbeat is one KV write on the uptime Worker (free plan: 1 000 a day, shared). A good run
+          # reports once an hour (the :07 slot, allowing 13 min of queue delay); a failed run always reports.
+          if [ "$CODE" = 0 ] && [ "$(date -u +%M)" -ge 20 ]; then echo "ok, hourly heartbeat already sent"; exit 0; fi
           if [ "$CODE" = 0 ]; then body='{"ok":true,"failed":[]}'; else body='{"ok":false,"failed":["security-signals"]}'; fi
           curl -fsS -X POST https://monitor.bookchaowalit.com/heartbeat/security-signals \
             -H "Authorization: Bearer $HEARTBEAT_TOKEN" -H "Content-Type: application/json" -d "$body"

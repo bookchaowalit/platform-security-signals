@@ -181,3 +181,7 @@ Independent Codex review and the automated security review of 817db1d found six 
   so every part of the window is queried at least once and nothing is skipped. Under a flood above 10 000
   events per slice the counts stay a lower bound (partial buckets, capacity signal); a backfill of those
   slices was considered and left out, because the sampled rows already open the signals that matter.
+- Fifth round (9c05d7f): `partial` markers are trimmed against each source's own cursor, so a source that
+  keeps failing still has them when it catches up. Heartbeats: every POST is one KV write on the uptime
+  Worker (free plan, 1 000 a day, shared with every other job), so a good run reports once an hour (the
+  :07 slot) and a failed run always reports; 24 writes a day instead of 96.

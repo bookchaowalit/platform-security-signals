@@ -185,6 +185,17 @@ class QuietNeedsCompleteHour(unittest.TestCase):  # review P2 on b76d295
         self.assertEqual(opened, [])
 
 
+class PartialSurvivesFailedPulls(unittest.TestCase):  # review P2 on 9c05d7f
+    def test_markers_are_kept_relative_to_the_source_cursor(self):
+        s = State.new()
+        process_source(s, 'fw', {b(n): [] for n in range(0, 3)}, partial={b(0), b(1), b(2)})
+        s.trim(b(40))  # other sources moved on for 10 h while fw kept failing
+        self.assertEqual(len(s.series['partial']['fw']), 3)
+        s.cursors['fw'] = b(40)
+        s.trim(b(40))
+        self.assertNotIn('partial', s.series)
+
+
 class Engine(unittest.TestCase):
     def test_baseline_run_opens_nothing(self):  # R4
         s = State.new()

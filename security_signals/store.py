@@ -79,9 +79,22 @@ class State:
         self.seen.setdefault(name, {})[key] = bucket
 
     # housekeeping ------------------------------------------------------------------------------
+    def _trim_partial(self, now_bucket, keep):
+        series = self.series.get('partial', {})
+        for source in list(series):
+            cutoff = min(now_bucket, self.cursors.get(source, now_bucket)) - keep * BUCKET
+            series[source] = {b: v for b, v in series[source].items() if int(b) >= cutoff}
+            if not series[source]:
+                del series[source]
+        if 'partial' in self.series and not self.series['partial']:
+            del self.series['partial']
+
     def trim(self, now_bucket):
         for name, keep in RETENTION.items():
             cutoff = now_bucket - keep * BUCKET
+            if name == 'partial':  # per source: a lagging cursor (failed pulls) still needs its markers
+                self._trim_partial(now_bucket, keep)
+                continue
             for key in list(self.series.get(name, {})):
                 points = self.series[name][key]
                 for b in [b for b in points if int(b) < cutoff]:
