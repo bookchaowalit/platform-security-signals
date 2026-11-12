@@ -51,6 +51,12 @@ A source with no configuration is reported as `off` and skipped.
 
 ## Status
 
-Phase A, not live yet. Open: R2 bucket + 90-day lifecycle on `bronze/` and 7-day on `raw-ip/`,
-secrets, jobs Worker job (`*/15`), uptime heartbeat target, identity `token.issue_failed` event (R9),
-`security-api` audit events (R11), then the controlled live test (AC11) and 7 quiet days (AC12).
+Live since 2026-11-12: jobs Worker job `security-signals` (`7-59/15 * * * *`) dispatches `signals.yml`;
+uptime heartbeat `security-signals` (2 h). R2 bucket `security-signals` with lifecycle `bronze/` 90 d,
+`raw-ip/` 7 d. Sources live: `fw`, `http`, `access` (account-owned read-only Cloudflare token
+`security-signals-read`; R2 key = token `security-signals-r2`, that bucket only).
+
+Open: `gw` and `idp` need Railway project tokens (Railway refuses project-token creation through the
+API, so the owner creates them in the dashboard); identity `token.issue_failed` event (R9);
+`security-api` audit events (R11); `SIGNALS_SELF_IPS` holds the home address only, Railway and Worker
+egress still to add; controlled live test (AC11) and 7 quiet days (AC12).
