@@ -196,6 +196,15 @@ class PartialSurvivesFailedPulls(unittest.TestCase):  # review P2 on 9c05d7f
         self.assertNotIn('partial', s.series)
 
 
+class Sig07StaysOpenOverCutWindow(unittest.TestCase):  # review P2 on 72a113a
+    def test_sig07_resolves_only_after_a_complete_window(self):
+        s = State.new()
+        source_failed(s, 'fw', b(0), 'HTTPError')
+        process_source(s, 'fw', {b(1): []}, partial={b(1)})
+        self.assertEqual(process_source(s, 'fw', {b(n): [] for n in range(2, 5)})[1], [])  # b(1) still in window
+        self.assertEqual([r['id'] for r in process_source(s, 'fw', {b(5): []})[1]], ['SIG-07:fw'])
+
+
 class Engine(unittest.TestCase):
     def test_baseline_run_opens_nothing(self):  # R4
         s = State.new()

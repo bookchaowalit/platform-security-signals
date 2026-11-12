@@ -64,8 +64,9 @@ def process_source(state, source, bucket_rows, baseline=False, partial=()):
             elif sid in state.acks or bucket - s['last_active'] >= _hold(s['rule']) * BUCKET:
                 _resolve(state, sid, resolved)
         sig07 = f'SIG-07:{source}'
-        if not quiet and not cut and sig07 in state.signals:
-            _resolve(state, sig07, resolved)  # a good pull ends a failure at once
+        window_complete = state.total('partial', source, bucket - 3 * BUCKET, bucket) == 0
+        if not quiet and window_complete and sig07 in state.signals:
+            _resolve(state, sig07, resolved)  # a complete good hour ends it; a cut one proves nothing
         rules.after(state, source, bucket, rows)
         state.cursors[source] = bucket
     return opened, resolved

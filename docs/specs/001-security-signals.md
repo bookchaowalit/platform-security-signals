@@ -185,3 +185,5 @@ Independent Codex review and the automated security review of 817db1d found six 
   keeps failing still has them when it catches up. Heartbeats: every POST is one KV write on the uptime
   Worker (free plan, 1 000 a day, shared with every other job), so a good run reports once an hour (the
   :07 slot) and a failed run always reports; 24 writes a day instead of 96.
+- Sixth round (72a113a): SIG-07 resolves only after a complete hour with rows or a good pull and no cut
+  bucket left in the 1-hour window; a clean bucket next to a cut one proves nothing.
