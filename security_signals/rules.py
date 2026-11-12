@@ -123,7 +123,7 @@ def _sig03(state, bucket, rows):
     for r in blocks:
         hosts[r['host']] += r['count']
     for host, n in sorted(hosts.items()):
-        if not state.was_seen('fw_host', host):
+        if not state.was_seen('fw_host', host, bucket):
             out.append(sig('SIG-03', host, 'medium', f'first blocks on {host} in 30 days ({n} in 15 min)'))
     return out
 
@@ -133,10 +133,10 @@ def _sig04(state, bucket, rows):
     for r in rows:
         if not r['success']:
             continue
-        if not state.was_seen('access_country', r['country']):
+        if not state.was_seen('access_country', r['country'], bucket):
             out.append(sig('SIG-04', f'country:{r["country"]}', 'high',
                            f'Access login from a new country {r["country"]} (app {r["app"]})', ip=r.get('ip')))
-        if r['device_hash'] and not state.was_seen('access_device', r['device_hash']):
+        if r['device_hash'] and not state.was_seen('access_device', r['device_hash'], bucket):
             out.append(sig('SIG-04', f'device:{r["device_hash"]}', 'high',
                            f'Access login from a new device ({r["country"]}, app {r["app"]})', ip=r.get('ip')))
     return out
@@ -166,7 +166,7 @@ def _sig06(state, bucket, rows):
         top = ', '.join(f'{k} {v}' for k, v in reasons.most_common(3))
         out.append(sig('SIG-06', 'identity', 'high', f'{total} failed token requests in 15 min ({top})'))
     for r in rows:
-        if r['reason'] in KNOWN_CLIENT_REASONS and not state.was_seen('idp_client', r['client_hash']):
+        if r['reason'] in KNOWN_CLIENT_REASONS and not state.was_seen('idp_client', r['client_hash'], bucket):
             out.append(sig('SIG-06', f'client:{_short(r["client_hash"])}', 'high',
                            f'a client not seen in 30 days is failing token requests ({r["reason"]})'))
     return out

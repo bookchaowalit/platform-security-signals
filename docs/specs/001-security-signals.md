@@ -152,3 +152,18 @@ GitHub signals (phase B), homelab logs (phase C), any always-on service, SIEM or
 - First live dry run (24 h, no Telegram): 424 firewall rows, 858 gateway HTTP errors, 568 gateway app errors,
   0 Access logins. A replay without baseline opened one SIG-02 from a Thai address (likely our own testing):
   the home IP must be in `SIGNALS_SELF_IPS` before going live.
+
+## Changes after review (2026-11-12)
+
+Independent Codex review and the automated security review of 817db1d found six issues; all fixed:
+
+- A refused Telegram message is kept for retry **without** raw IPs (R3); only the copy sent at once shows them.
+- The workflow writes state only after every bronze object landed, so cursors never pass unstored buckets.
+- "Seen in 30 days" is checked against the bucket being evaluated, not only by the end-of-run trim
+  (an outage longer than the remaining age no longer hides a new country, device, host or client).
+- A first run that already has a failing source reports its SIG-07 in the baseline message.
+- SIG-00 scope: anyone can run code on GitHub Actions, so its ranges only filter the gateway HTTP source
+  (SIG-02); firewall events use only `SIGNALS_SELF_IPS` and Access logins are never filtered.
+- A flood can fill a Cloudflare page. A page that cannot be split, or a split past the 24-request budget,
+  is kept (or skipped) and reported as `SIG-07:<source>-capacity` and `truncated` in the summary, instead of
+  failing the source and blinding the rules that should fire.

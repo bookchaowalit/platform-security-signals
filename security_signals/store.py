@@ -69,8 +69,10 @@ class State:
         return list(self.series.get(name, {}))
 
     # seen sets ---------------------------------------------------------------------------------
-    def was_seen(self, name, key):
-        return key in self.seen.get(name, {})
+    def was_seen(self, name, key, bucket):
+        """Seen within the 30 days before `bucket`, not just still in the set (trim runs at the end)."""
+        last = self.seen.get(name, {}).get(key)
+        return last is not None and last >= bucket - SEEN_RETENTION * BUCKET
 
     def mark_seen(self, name, key, bucket):
         self.seen.setdefault(name, {})[key] = bucket

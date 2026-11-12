@@ -2,15 +2,15 @@
 import json
 import unittest
 
-from security_signals.model import BUCKET, SelfIPs
+from security_signals.model import BUCKET, SelfIPs, SelfTraffic
 from security_signals.run import CATCH_UP, LAG, NOTIFY_FAILED, OK, SOURCE_FAILED, run
 from security_signals.sources import ProviderError
 from security_signals.store import State
 
-from .helpers import b, http
+from .helpers import access, b, fw, http
 
 NOW = b(200) + LAG + 1  # buckets up to b(199) are complete
-OWN = SelfIPs(['192.0.2.0/24'], [])
+OWN = SelfTraffic(SelfIPs([], ['192.0.2.0/24']), SelfIPs(['198.18.0.0/15']))  # explicit, 'GitHub Actions'
 
 
 def collector(rows_by_bucket=None, error=None, calls=None):
@@ -105,6 +105,44 @@ class Runs(unittest.TestCase):
         _, _, a, _ = run('', NOW, {'http': collector(rows)}, OWN, Sent())
         _, _, c, _ = run('', NOW, {'http': collector({b(199): list(reversed(rows[b(199)]))})}, OWN, Sent())
         self.assertEqual(a, c)
+
+    def test_cut_pages_open_a_capacity_signal(self):  # security review: a flood is reported, not hidden
+        sent = Sent()
+        _, state, _, _ = run('', NOW, {'fw': collector()}, OWN, sent)
+        flood = collector({b(200): [fw(count=5)]})
+        flood.truncated = 2
+        _, state, _, summary = run(state, NOW + BUCKET, {'fw': flood}, OWN, sent)
+        self.assertIn('SIG-07', sent[-1])
+        self.assertEqual(json.loads(summary)['truncated'], {'fw': 2})
+        _, _, _, _ = run(state, NOW + 2 * BUCKET, {'fw': collector()}, OWN, sent)
+        self.assertIn('✅ SIG-07', sent[-1])
+
+    def test_kept_message_has_no_raw_ip(self):  # review P1: R3
+        def refuse(text):
+            raise OSError('no')
+        _, state, _, _ = run('', NOW, {'http': collector()}, OWN, Sent())
+        code, state, _, _ = run(state, NOW + BUCKET, {'http': collector({b(200): [http(count=40)]})}, OWN, refuse)
+        self.assertEqual(code, NOTIFY_FAILED)
+        self.assertIn('SIG-02', state)
+        self.assertNotIn('203.0.113.9', state)
+
+    def test_first_run_reports_a_failing_source(self):  # review P2
+        sent = Sent()
+        code, _, _, _ = run('', NOW, {'http': collector(), 'fw': collector(error='http 403')}, OWN, sent)
+        self.assertEqual(code, SOURCE_FAILED)
+        self.assertIn('baseline', sent[0])
+        self.assertIn('SIG-07', sent[0])
+
+    def test_github_ranges_quiet_only_the_gateway_http_source(self):  # security review: allowlist scope
+        sent = Sent()
+        gh = '198.18.0.7'
+        _, state, _, _ = run('', NOW, {'http': collector(), 'fw': collector(), 'access': collector()}, OWN, sent)
+        run(state, NOW + BUCKET, {'http': collector({b(200): [http(ip=gh, count=500)]}),
+                                  'fw': collector({b(200): [fw(ip=gh, count=300)]}),
+                                  'access': collector({b(200): [access(ip=gh, country='RU')]})}, OWN, sent)
+        self.assertNotIn('SIG-02', sent[-1])
+        self.assertIn('SIG-03', sent[-1])
+        self.assertIn('SIG-04', sent[-1])
 
 
 if __name__ == '__main__':

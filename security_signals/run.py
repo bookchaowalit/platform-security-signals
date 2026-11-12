@@ -8,7 +8,7 @@ import urllib.request
 from pathlib import Path
 
 from .engine import process_source, source_failed
-from .model import BUCKET, DAY, SelfIPs, drop_self, iso
+from .model import BUCKET, DAY, SelfIPs, SelfTraffic, drop_self, iso
 from .report import message, public_summary
 from .rules import SOURCES
 from .sources import Cloudflare, ProviderError, Railway, github_actions_ranges
@@ -18,6 +18,29 @@ OK, SOURCE_FAILED, NOTIFY_FAILED, CONFIG_FAILED = 0, 2, 3, 4
 LAG = 600  # analytics and log indexing lag; only buckets that ended 10 min ago are pulled
 CATCH_UP = DAY  # R6: at most 24 h back after an outage
 IP_SOURCES = {'fw', 'http', 'access'}
+
+
+def _capacity(state, source, bucket, cut):
+    """A full page we kept or a slice we skipped: likely a flood, so say so instead of failing (R5)."""
+    from .engine import _open
+    from .rules import sig
+    opened = []
+    _open(state, sig('SIG-07', f'{source}-capacity', 'medium',
+                     f'{source} hit the collector page limit {cut}× (flood?); counts are a lower bound'), bucket, opened)
+    return opened
+
+
+class Pull:
+    """A collector call that also reports how many Cloudflare pages were cut (see Cloudflare._zone_rows)."""
+
+    def __init__(self, fn, cf):
+        self.fn, self.cf, self.truncated = fn, cf, 0
+
+    def __call__(self, start, end):
+        before = self.cf.truncated
+        rows = self.fn(start, end)
+        self.truncated = self.cf.truncated - before
+        return rows
 
 
 def bronze_files(source, bucket_rows, keep_raw_ip):
@@ -41,7 +64,7 @@ def bronze_files(source, bucket_rows, keep_raw_ip):
 def run(state_text, now, collectors, own, send, keep_raw_ip=False):
     """collectors: {source: fn(start, end) -> [(bucket, row)]}; a missing source is off.
 
-    own: SelfIPs, or None when the GitHub ranges could not be read (then `http` counts as failed,
+    own: SelfTraffic, or None when the GitHub ranges could not be read (then `http` counts as failed,
     because SIG-02 without SIG-00 would alert on our own runners).
     Returns (exit code, new state text, bronze {key: bytes}, public summary).
     """
@@ -49,7 +72,7 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False):
     baseline = state is None
     state = state or State.new()
     end = (int(now) - LAG) // BUCKET * BUCKET
-    opened, resolved, bronze, rows_n, status = [], [], {}, {}, {}
+    opened, resolved, bronze, rows_n, status, truncated = [], [], {}, {}, {}, {}
     for source in SOURCES:
         fn = collectors.get(source)
         if fn is None:
@@ -70,11 +93,19 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False):
             status[source] = 'failed'
             continue
         bucket_rows = {b: [] for b in range(start, end, BUCKET)}
-        kept = drop_self([r for _, r in pulled], own) if source in IP_SOURCES and own else [r for _, r in pulled]
+        allow = own.for_source(source) if own else None
+        kept = drop_self([r for _, r in pulled], allow) if allow else [r for _, r in pulled]
         kept_ids = {id(r) for r in kept}
         for b, r in pulled:
             if start <= b < end and id(r) in kept_ids:
                 bucket_rows[b].append(r)
+        cut = getattr(fn, 'truncated', 0)
+        capacity = f'SIG-07:{source}-capacity'
+        if cut:
+            truncated[source] = cut
+            opened += _capacity(state, source, end - BUCKET, cut)
+        elif capacity in state.signals:
+            resolved.append(state.signals.pop(capacity) | {'id': capacity})
         rows_n[source] = sum(r.get('count', 1) for rs in bucket_rows.values() for r in rs)
         bronze.update(bronze_files(source, bucket_rows, keep_raw_ip))
         o, r = process_source(state, source, bucket_rows, baseline=baseline)
@@ -86,19 +117,23 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False):
     open_count = {}
     for s in state.signals.values():
         open_count[s['severity']] = open_count.get(s['severity'], 0) + 1
-    text = message(opened, resolved, open_count, baseline=rows_n if baseline else None)
-    queue = [*state.pending, *([text] if text else [])]
+    args = (opened, resolved, open_count, rows_n if baseline else None)
+    text = message(*args)
+    # (text to send now, copy to keep if it fails): the kept copy has no raw IP (R3); old pending ones never had one
+    queue = [(p, p) for p in state.pending] + ([(text, message(*args, show_ip=False))] if text else [])
     state.pending = []
-    for n, item in enumerate(queue):
+    for n, (item, _) in enumerate(queue):
         try:
             send(item)
         except Exception:  # noqa: BLE001  kept in state, retried next run (R8)
-            state.pending = queue[n:]
+            state.pending = [keep for _, keep in queue[n:]]
             break
 
     summary = json.loads(public_summary(rows_n, status, list(state.signals.values()), opened, resolved))
     if state.pending:
         summary['alerts_pending'] = len(state.pending)
+    if truncated:
+        summary['truncated'] = truncated
     code = SOURCE_FAILED if 'failed' in status.values() else NOTIFY_FAILED if state.pending else OK
     summary['exit'] = code
     return code, state.dump(), bronze, json.dumps(summary, sort_keys=True)
@@ -122,9 +157,9 @@ def collectors_from_env(env):
     if env.get('SIGNALS_CF_TOKEN'):
         cf = Cloudflare(env['SIGNALS_CF_TOKEN'], env['SIGNALS_CF_ZONE_ID'], env['SIGNALS_CF_ACCOUNT_ID'], key)
         host = env.get('SIGNALS_GATEWAY_HOST', 'gateway.bookchaowalit.com')
-        out['fw'] = cf.firewall
-        out['http'] = lambda a, b: cf.gateway_http(a, b, host)
-        out['access'] = cf.access
+        out['fw'] = Pull(cf.firewall, cf)
+        out['http'] = Pull(lambda a, b: cf.gateway_http(a, b, host), cf)
+        out['access'] = Pull(cf.access, cf)
 
     def railway(token_var):
         token = env.get(token_var) or env.get('SIGNALS_RAILWAY_TOKEN')
@@ -144,7 +179,8 @@ def self_ips(env):
         ranges = github_actions_ranges()
     except ProviderError:
         return None
-    return SelfIPs(ranges, [a for a in env.get('SIGNALS_SELF_IPS', '').replace('\n', ',').split(',') if a.strip()])
+    explicit = [a for a in env.get('SIGNALS_SELF_IPS', '').replace('\n', ',').split(',') if a.strip()]
+    return SelfTraffic(SelfIPs([], explicit), SelfIPs(ranges))
 
 
 def main(argv=None, env=os.environ):

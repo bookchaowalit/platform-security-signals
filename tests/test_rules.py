@@ -107,6 +107,11 @@ class Sig04AccessOrigin(unittest.TestCase):  # AC5
         run(s, 'access', {0: [access()]}, baseline=True)
         self.assertEqual(run(s, 'access', {1: [access(device='dev-2')]})[0], ['SIG-04:device:dev-2'])
 
+    def test_seen_older_than_30_days_counts_as_new_even_before_trim(self):  # review P2
+        s = State.new()
+        run(s, 'access', {0: [access(country='RU')]}, baseline=True)
+        self.assertEqual(run(s, 'access', {31 * 96: [access(country='RU')]})[0], ['SIG-04:country:RU', 'SIG-04:device:dev-1'])
+
     def test_ack_resolves(self):
         s = State.new()
         run(s, 'access', {0: [access()]}, baseline=True)

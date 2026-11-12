@@ -53,5 +53,24 @@ class SelfIPs:
         return any(addr in n for n in (self.v4 if addr.version == 4 else self.v6))
 
 
+class SelfTraffic:
+    """Which allowlist applies where (SIG-00).
+
+    Anyone can run code on GitHub Actions, so its ranges only quiet SIG-02 on the gateway, where our
+    own CI and probes would otherwise alert every hour; SIG-01 (no IP) still sees volume from there.
+    Firewall events use only our explicit addresses, and Access logins are never filtered (SIG-04).
+    """
+
+    def __init__(self, explicit, actions=None):
+        self.explicit, self.actions = explicit, actions or SelfIPs()
+
+    def for_source(self, source):
+        if source == 'http':
+            return SelfIPs([*map(str, self.explicit.networks), *map(str, self.actions.networks)])
+        if source == 'fw':
+            return self.explicit
+        return None
+
+
 def drop_self(rows, own):
     return [r for r in rows if not own.contains(r.get('ip', ''))]

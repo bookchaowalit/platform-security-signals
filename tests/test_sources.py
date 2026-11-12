@@ -4,7 +4,15 @@ import json
 import unittest
 import urllib.error
 
-from security_signals.sources import CF_LIMIT, RAILWAY_LIMIT, Cloudflare, ProviderError, Railway, _path_prefix
+from security_signals.sources import (
+    CF_LIMIT,
+    CF_MAX_REQUESTS,
+    RAILWAY_LIMIT,
+    Cloudflare,
+    ProviderError,
+    Railway,
+    _path_prefix,
+)
 
 from .helpers import KEY, T0
 
@@ -50,6 +58,21 @@ class CloudflareFirewall(unittest.TestCase):
         rows = Cloudflare('t', 'z', 'a', KEY, opener=op).firewall(T0, T0 + 1800)
         self.assertEqual(len(op.requests), 3)
         self.assertEqual(sum(r['count'] for _, r in rows), 2)
+
+    def test_flood_that_fills_a_minute_is_kept_not_failed(self):  # security review: flood must not blind
+        full = [fw_row(1)] * CF_LIMIT
+        cf = Cloudflare('t', 'z', 'a', KEY, opener=FakeOpener(zone('firewallEventsAdaptive', full)))
+        rows = cf.firewall(T0, T0 + 60)
+        self.assertEqual(sum(r['count'] for _, r in rows), CF_LIMIT)
+        self.assertEqual(cf.truncated, 1)
+
+    def test_request_budget_caps_splitting(self):
+        full = zone('firewallEventsAdaptive', [fw_row(1)] * CF_LIMIT)
+        op = FakeOpener(*[full] * 100)
+        cf = Cloudflare('t', 'z', 'a', KEY, opener=op)
+        cf.firewall(T0, T0 + 86_400)
+        self.assertLessEqual(len(op.requests), CF_MAX_REQUESTS)
+        self.assertGreater(cf.truncated, 0)
 
     def test_graphql_error_and_http_error_raise(self):
         with self.assertRaises(ProviderError):

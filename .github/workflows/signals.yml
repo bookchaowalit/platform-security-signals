@@ -62,11 +62,13 @@ jobs:
               --bronze-dir "$RUNNER_TEMP/bronze" 2>> "$RUNNER_TEMP/stderr.log" | tee -a "$GITHUB_STEP_SUMMARY"
             code=${PIPESTATUS[0]}
           fi
-          # Bronze first, then state: a crash between them re-pulls the same buckets (same objects, AC9).
+          # Bronze first, then state, and state only when every bronze object landed: otherwise the
+          # cursors would move past buckets that were never stored. A re-pull writes the same objects (AC9).
+          bronze_ok=1
           if [ -d "$RUNNER_TEMP/bronze" ]; then
-            python -m security_signals.r2 put-dir "$RUNNER_TEMP/bronze" 2>> "$RUNNER_TEMP/stderr.log" || code=2
+            python -m security_signals.r2 put-dir "$RUNNER_TEMP/bronze" 2>> "$RUNNER_TEMP/stderr.log" || { bronze_ok=0; code=2; }
           fi
-          if [ -f "$RUNNER_TEMP/current.json" ]; then
+          if [ "$bronze_ok" = 1 ] && [ -f "$RUNNER_TEMP/current.json" ]; then
             python -m security_signals.r2 put state/state.json "$RUNNER_TEMP/current.json" 2>> "$RUNNER_TEMP/stderr.log" || code=2
           fi
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
