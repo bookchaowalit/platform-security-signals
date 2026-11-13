@@ -120,7 +120,9 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None):
         capacity = f'SIG-07:{source}-capacity'
         if cut:
             truncated[source] = cut
-            opened += _capacity(state, source, min(partial) if partial else start, cut)  # stable on replay
+            # `start` follows the stored cursor; page splits (and so the first cut bucket) change with the
+            # window length, so they would give a replay a new audit key (review on 3a0c351)
+            opened += _capacity(state, source, start, cut)
         elif capacity in state.signals:
             _resolve(state, capacity, resolved)
         rows_n[source] = sum(r.get('count', 1) for rs in bucket_rows.values() for r in rs)
@@ -149,6 +151,7 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None):
         state.audit = audit(state.audit)  # the ones security-api did not take stay for the next run (R8)
     audit_failed = bool(audit and state.audit)
 
+    state.bound_audit()  # before the summary, so audit_pending/audit_dropped match the written state
     summary = json.loads(public_summary(rows_n, status, list(state.signals.values()), opened, resolved))
     if state.pending:
         summary['alerts_pending'] = len(state.pending)

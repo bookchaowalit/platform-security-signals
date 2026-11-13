@@ -115,11 +115,20 @@ class Runs(unittest.TestCase):
         keys = []
         for later in (NOW + 2 * BUCKET, NOW + 3 * BUCKET):  # the first result is lost (bronze upload failed)
             flood = collector({b(200): [fw(count=5)]})
-            flood.truncated, flood.partial = 1, [(b(200), b(201))]
+            flood.truncated = 1
+            flood.partial = [(b(201), b(202))] if later == NOW + 2 * BUCKET else [(b(202), b(203))]  # pages split anew
             _, out, _, _ = run(state, later, {'fw': flood, 'http': collector(error='http 500')}, OWN, Sent())
             keys.append(sorted(idempotency_key(e) for e in State.load(out).audit))
         self.assertEqual(len(keys[0]), 3)  # SIG-07 capacity, SIG-07 http failed, SIG-03 new host
         self.assertEqual(keys[0], keys[1])
+
+    def test_summary_reports_what_the_cap_dropped(self):  # review on 3a0c351
+        _, state, _, _ = run('', NOW, {'http': collector()}, OWN, Sent())
+        data = json.loads(state)
+        data['audit'] = [{'change': 'opened', 'id': f'SIG-03:h{n}', 'at': n} for n in range(MAX_AUDIT + 20)]  # over the cap
+        _, _, _, summary = run(json.dumps(data), NOW, {'http': collector()}, OWN, Sent())
+        self.assertEqual(json.loads(summary)['audit_dropped'], 21)
+        self.assertEqual(json.loads(summary)['audit_pending'], MAX_AUDIT)
 
     def test_kept_events_are_capped(self):
         s = State.new()

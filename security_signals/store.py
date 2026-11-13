@@ -50,7 +50,7 @@ class State:
             raise ValueError(f'unknown state version {data.get("version")}')
         return cls(data)
 
-    def _bound_audit(self):
+    def bound_audit(self):
         if len(self.audit) <= MAX_AUDIT:
             return
         markers = [e for e in self.audit if e['change'] == 'dropped']
@@ -62,7 +62,7 @@ class State:
                        'at': self.audit_dropped}, *keep] if markers or len(real) > len(keep) else keep
 
     def dump(self):
-        self._bound_audit()
+        self.bound_audit()
         pending = self.pending
         if len(pending) > MAX_PENDING:
             pending = [f'Security signals: {len(pending) - MAX_PENDING + 1} older undelivered alerts were dropped.',

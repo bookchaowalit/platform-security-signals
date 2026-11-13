@@ -209,3 +209,6 @@ Independent Codex review and the automated security review of 817db1d found six 
   silently. The queue now holds 2 000 events; past that the oldest still go, but a `signal.dropped` event
   `sig-07.audit-dropped-<running total>` takes their place and is posted first, and the run summary shows
   `audit_dropped`.
+- Review round on 3a0c351: the capacity signal opens at the pull's `start` (from the stored cursor), not
+  the first cut bucket, because page splits change with the window length on a replay. The audit queue is
+  bounded before the run summary, so `audit_pending` / `audit_dropped` match the state that is written.
