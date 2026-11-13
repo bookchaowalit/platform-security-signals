@@ -134,6 +134,15 @@ class Cloudflare:
         return out
 
 
+def _attribute(value):
+    """Railway returns each parsed log attribute JSON-encoded (`\"habits\"`, `401`); plain text stays as is."""
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return value
+    return decoded if isinstance(decoded, (str, int, float, bool)) or decoded is None else value
+
+
 class Railway:
     """Structured stdout logs that Railway parsed into attributes (spike: gateway `request.completed`)."""
 
@@ -162,7 +171,7 @@ class Railway:
         for line in lines:
             t = parse_time(line['timestamp'])
             if start <= t < end:
-                out.append((t, {a['key']: a['value'] for a in line.get('attributes') or []}))
+                out.append((t, {a['key']: _attribute(a['value']) for a in line.get('attributes') or []}))
         return out
 
     def gateway(self, environment_id, start, end):

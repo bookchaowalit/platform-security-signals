@@ -35,7 +35,7 @@ heartbeat `security-signals`.
 | `cf-http` | Cloudflare GraphQL `httpRequestsAdaptiveGroups`, host `gateway.bookchaowalit.com`, status ≥ 400, by status × clientIP × country | ≥ 8 days look-back |
 | `cf-access` | Cloudflare GraphQL `accessLoginRequestsAdaptiveGroups` (account) by isSuccessfulLogin × country × deviceId × appId | one query may span at most 1 week |
 | `gw-app` | Railway GraphQL `environmentLogs(filter:"@event:request.completed")` on project `platform-api-gateway`, attributes `status route system subject_hash` | ~1 000 lines ≈ 9 h per call; page by `beforeDate` |
-| `idp` | Railway logs of identity, event `token.issue_failed` | **does not exist yet**: identity change in this spec (R9) |
+| `idp` | Railway logs of identity, event `token.issue_failed` | live since 2026-11-13: platform-identity SPEC-007 (`docs/TOKEN-FAILURE-EVENT.md`, 6bac1f6) |
 
 ## Rules (v1)
 
@@ -215,3 +215,17 @@ Independent Codex review and the automated security review of 817db1d found six 
 - Review round on 47a493f: after an outage longer than 24 h the capped window start moves with the clock,
   so SIG-07 (failed pull, capacity) is anchored to the stored cursor instead. A source with no cursor yet
   has nothing stored to anchor to and uses its window start (a lost first state write can repeat one event).
+
+### R9 built (2026-11-13)
+
+- platform-identity SPEC-007 (6bac1f6, deployed): every 4xx `/v1/token` answer writes one stdout JSON
+  line `{"event":"token.issue_failed","level":"warning","grant_type","reason","client_hash"}`. Reasons are
+  the OAuth error codes plus `rate_limited` (the 429); `client_hash` is an HMAC only for a registered
+  client, else `""`. The reason set is wider than this spec first listed (`invalid_request`,
+  `invalid_target`, `unsupported_grant_type` added); SIG-06 counts every reason and judges the "new
+  client" case on `invalid_grant|invalid_scope|unauthorized_client` as before.
+- Railway returns every parsed attribute JSON-encoded (`"habits"` with its quotes, `401`). The collector
+  now decodes them; without that SIG-01 system names carried quotes and no SIG-06 reason ever matched.
+- Live check: two refused requests (forged assertion, unknown grant) read back through the collector as
+  `invalid_client` (hashed) and `unsupported_grant_type` (no hash) in the same bucket.
+- The `idp` and `gw` sources still need the Railway project tokens (O-7) to run in the job.

@@ -115,7 +115,8 @@ class CloudflareHttpAndAccess(unittest.TestCase):
 
 
 def line(ts, **attrs):
-    return {'timestamp': ts, 'attributes': [{'key': k, 'value': str(v)} for k, v in attrs.items()]}
+    # as Railway returns them (seen 2026-11-13): every value JSON-encoded, strings with their quotes
+    return {'timestamp': ts, 'attributes': [{'key': k, 'value': json.dumps(v)} for k, v in attrs.items()]}
 
 
 class RailwayLogs(unittest.TestCase):
@@ -128,6 +129,12 @@ class RailwayLogs(unittest.TestCase):
         rows = Railway('t', opener=op).gateway('env', T0, T0 + 1800)
         self.assertEqual(rows, [(T0, {'system': 'habits', 'status': 401, 'count': 2})])
         self.assertEqual(op.requests[0]['variables']['f'], '@event:request.completed')
+
+    def test_plain_attribute_values_still_parse(self):
+        raw = [{'timestamp': '2026-11-12T00:05:00Z', 'attributes': [{'key': 'event', 'value': 'token.issue_failed'},
+               {'key': 'reason', 'value': 'invalid_client'}, {'key': 'client_hash', 'value': ''}]}]
+        rows = Railway('t', opener=FakeOpener({'data': {'environmentLogs': raw}})).identity('env', T0, T0 + 900)
+        self.assertEqual(rows, [(T0, {'reason': 'invalid_client', 'client_hash': '', 'count': 1})])
 
     def test_project_token_header(self):
         self.assertEqual(Railway('t', project_token=True).header, {'Project-Access-Token': 't'})
