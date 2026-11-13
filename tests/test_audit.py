@@ -124,9 +124,18 @@ class Runs(unittest.TestCase):
     def test_kept_events_are_capped(self):
         s = State.new()
         s.audit = [{'change': 'opened', 'id': f'SIG-03:h{n}', 'at': n} for n in range(MAX_AUDIT + 20)]
-        kept = State.load(s.dump()).audit
+        loaded = State.load(s.dump())
+        kept = loaded.audit
         self.assertEqual(len(kept), MAX_AUDIT)
-        self.assertEqual(kept[0]['at'], 20)  # the oldest go first
+        self.assertEqual(loaded.audit_dropped, 21)  # 20 over the cap + 1 slot for the marker
+        self.assertEqual(kept[0], {'change': 'dropped', 'id': 'SIG-07:audit-dropped-21', 'at': 21})  # posted first
+        self.assertEqual(kept[1]['at'], 21)  # then the newest real events, oldest dropped
+        self.assertEqual(event_target(kept[0]['id']), 'sig-07.audit-dropped-21')
+        loaded.audit += [{'change': 'opened', 'id': f'SIG-03:x{n}', 'at': n} for n in range(5)]
+        again = State.load(loaded.dump())
+        self.assertEqual(again.audit_dropped, 26)
+        self.assertEqual([e for e in again.audit if e['change'] == 'dropped'],
+                         [{'change': 'dropped', 'id': 'SIG-07:audit-dropped-26', 'at': 26}])  # one marker, new total
 
 
 @unittest.skipUnless(shutil.which('openssl'), 'openssl not installed')

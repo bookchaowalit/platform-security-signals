@@ -19,7 +19,9 @@ RETENTION = {
 }
 SEEN_RETENTION = 30 * DAY
 MAX_PENDING = 5
-MAX_AUDIT = 500  # audit events kept for the next run (R8, R11); the oldest go first
+# Audit events kept for the next run (R8, R11). Past this the oldest go, but never silently: a marker
+# `SIG-07:audit-dropped-<running total>` takes their place at the front and is posted first.
+MAX_AUDIT = 2000
 
 
 class State:
@@ -32,6 +34,7 @@ class State:
         self.pending = data.get('pending', [])
         self.acks = data.get('acks', [])
         self.audit = data.get('audit', [])  # [{change, id, at}] not yet in security-api
+        self.audit_dropped = data.get('audit_dropped', 0)  # running total of events lost to MAX_AUDIT
 
     @classmethod
     def new(cls):
@@ -47,14 +50,26 @@ class State:
             raise ValueError(f'unknown state version {data.get("version")}')
         return cls(data)
 
+    def _bound_audit(self):
+        if len(self.audit) <= MAX_AUDIT:
+            return
+        markers = [e for e in self.audit if e['change'] == 'dropped']
+        real = [e for e in self.audit if e['change'] != 'dropped']
+        keep = real[-(MAX_AUDIT - 1):]
+        self.audit_dropped += len(real) - len(keep)
+        # an older marker is covered by the new running total, so it is replaced rather than kept
+        self.audit = [{'change': 'dropped', 'id': f'SIG-07:audit-dropped-{self.audit_dropped}',
+                       'at': self.audit_dropped}, *keep] if markers or len(real) > len(keep) else keep
+
     def dump(self):
+        self._bound_audit()
         pending = self.pending
         if len(pending) > MAX_PENDING:
             pending = [f'Security signals: {len(pending) - MAX_PENDING + 1} older undelivered alerts were dropped.',
                        *pending[-(MAX_PENDING - 1):]]
         return json.dumps({'version': VERSION, 'cursors': self.cursors, 'first': self.first, 'series': self.series,
                            'seen': self.seen, 'signals': self.signals, 'pending': pending, 'acks': self.acks,
-                           'audit': self.audit[-MAX_AUDIT:]},
+                           'audit': self.audit, 'audit_dropped': self.audit_dropped},
                           sort_keys=True, separators=(',', ':')) + '\n'
 
     # count series -----------------------------------------------------------------------------

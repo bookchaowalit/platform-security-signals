@@ -154,6 +154,8 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None):
         summary['alerts_pending'] = len(state.pending)
     if state.audit:
         summary['audit_pending'] = len(state.audit)
+    if state.audit_dropped:
+        summary['audit_dropped'] = state.audit_dropped
     if truncated:
         summary['truncated'] = truncated
     code = SOURCE_FAILED if 'failed' in status.values() else NOTIFY_FAILED if state.pending or audit_failed else OK

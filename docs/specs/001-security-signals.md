@@ -205,3 +205,7 @@ Independent Codex review and the automated security review of 817db1d found six 
   pull and for a capacity cut now opens in a bucket that follows the cursor (`start` / first cut bucket),
   so a replay after a lost state write reuses the same audit idempotency key instead of a second
   `signal.opened`.
+- Security review on aa70a27: a burst of opens larger than the queue used to lose the oldest events
+  silently. The queue now holds 2 000 events; past that the oldest still go, but a `signal.dropped` event
+  `sig-07.audit-dropped-<running total>` takes their place and is posted first, and the run summary shows
+  `audit_dropped`.
