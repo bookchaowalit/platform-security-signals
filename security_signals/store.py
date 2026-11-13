@@ -35,7 +35,9 @@ class State:
         self.acks = data.get('acks', [])
         self.audit = data.get('audit', [])  # [{change, id, at}] not yet in security-api
         self.audit_dropped = data.get('audit_dropped', 0)  # running total of events lost to MAX_AUDIT
-        self.audit_anchor, self.audit_seq = None, {}  # per run, never stored (engine._audit_at)
+        self.audit_anchor = None  # set per source by the run (engine._audit_at)
+        # {anchor: {signal id: lifetimes numbered}}: stored, so a later run on the same cursor keeps counting
+        self.audit_seq = data.get('audit_seq', {})
 
     @classmethod
     def new(cls):
@@ -70,7 +72,7 @@ class State:
                        *pending[-(MAX_PENDING - 1):]]
         return json.dumps({'version': VERSION, 'cursors': self.cursors, 'first': self.first, 'series': self.series,
                            'seen': self.seen, 'signals': self.signals, 'pending': pending, 'acks': self.acks,
-                           'audit': self.audit, 'audit_dropped': self.audit_dropped},
+                           'audit': self.audit, 'audit_dropped': self.audit_dropped, 'audit_seq': self.audit_seq},
                           sort_keys=True, separators=(',', ':')) + '\n'
 
     # count series -----------------------------------------------------------------------------

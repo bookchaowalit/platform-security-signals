@@ -142,6 +142,17 @@ class Runs(unittest.TestCase):
         self.assertTrue(keys[0])
         self.assertEqual(keys[0], keys[1])
 
+    def test_a_reopened_signal_on_an_unmoved_cursor_gets_a_new_key(self):  # review P2 on a05b213
+        _, state, _, _ = run('', NOW, {'http': collector()}, OWN, Sent())
+        _, state, _, _ = run(state, NOW + BUCKET, {'http': collector(error='http 500')}, OWN, Sent())  # opens
+        s = State.load(state)
+        first = s.signals['SIG-07:http']['audit_at']
+        s.signals.pop('SIG-07:http')  # resolved in a later bucket of the next run, then failing again
+        _, out, _, _ = run(s.dump(), NOW + 2 * BUCKET, {'http': collector(error='http 500')}, OWN, Sent())
+        second = State.load(out).signals['SIG-07:http']['audit_at']
+        self.assertNotEqual(first, second)
+        self.assertEqual(first.rsplit('.', 1)[0], second.rsplit('.', 1)[0])  # same anchor, next number
+
     def test_summary_reports_what_the_cap_dropped(self):  # review on 3a0c351
         _, state, _, _ = run('', NOW, {'http': collector()}, OWN, Sent())
         data = json.loads(state)

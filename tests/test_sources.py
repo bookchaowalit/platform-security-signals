@@ -72,11 +72,26 @@ class CloudflareFirewall(unittest.TestCase):
         op = FakeOpener(*[full] * 100)
         ticks = iter(range(0, 10_000, 15))  # every clock reading is 15 s later: each answer takes 15 s
         cf = Cloudflare('t', 'z', 'a', KEY, opener=op, clock=lambda: next(ticks))
-        cf.firewall(T0, T0 + 900)
+        rows = cf.firewall(T0, T0 + 900)
         self.assertLessEqual(len(op.requests), CF_TIME_BUDGET // 15 + 1)
-        self.assertTrue(cf.skipped)
-        covered = sorted(cf.partial + cf.skipped)  # what was cut or left still tiles the window
+        self.assertEqual(cf.skipped, [])
+        # rows already read are never thrown away (review on a05b213): disjoint full pages stand in for
+        # their ranges, together tiling the window, so nothing is counted twice
+        covered = sorted(cf.partial)
         self.assertEqual((covered[0][0], covered[-1][1]), (T0, T0 + 900))
+        self.assertTrue(all(x[1] == y[0] for x, y in zip(covered, covered[1:], strict=False)))
+        self.assertEqual(sum(r['count'] for _, r in rows), CF_LIMIT * len(covered))
+
+    def test_a_finished_half_keeps_its_rows_and_nothing_counts_twice(self):
+        full = zone('firewallEventsAdaptive', [fw_row(1)] * CF_LIMIT)
+        half = zone('firewallEventsAdaptive', [fw_row(1)] * 10)
+        op = FakeOpener(full, half, full, *[full] * 10)  # root full, left half small, right half full again
+        ticks = iter([0, 0, 10, 20, 100, 100])  # out of time once the right half has split
+        cf = Cloudflare('t', 'z', 'a', KEY, opener=op, clock=lambda: next(ticks))
+        rows = cf.firewall(T0, T0 + 900)
+        # left half: its own 10 rows; right half: its page stands in for its unfetched quarters
+        self.assertEqual(sum(r['count'] for _, r in rows), 10 + CF_LIMIT)
+        self.assertEqual(cf.partial, [(T0 + 450, T0 + 900)])
 
     def test_request_budget_caps_splitting(self):
         full = zone('firewallEventsAdaptive', [fw_row(1)] * CF_LIMIT)

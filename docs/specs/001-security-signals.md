@@ -250,3 +250,9 @@ Independent Codex review and the automated security review of 817db1d found six 
   failures carry none and count only in the surge. (3) Every signal's audit identity is the source's
   stored cursor plus a per-run sequence (`audit_at`), so a replay after a lost state write repeats every
   key even when the 24 h catch-up window has moved and a signal opens in another bucket.
+- Review round on a05b213: (1) a split page's rows are kept until both halves are read; when the time
+  budget runs out, the nearest read page above each unread half stands in for its range (finished halves
+  elsewhere keep their own rows, ranges stay disjoint, so nothing counts twice) and that range is partial.
+  (2) The audit sequence is stored per anchor (`audit_seq`), so a signal that resolves and reopens on a
+  cursor that did not move gets the next number instead of its earlier lifetime's key; anchors the next
+  run can no longer use are pruned.

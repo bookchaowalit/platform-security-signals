@@ -22,11 +22,14 @@ def _audit_at(state, sid, bucket):
 
     Inside a run the anchor is the source's stored cursor, which a replay of the same state repeats exactly,
     even when the 24 h catch-up window has moved and the signal would open in another bucket (reviews on
-    47a493f, 8930831). A per-run sequence keeps two lifetimes of one id in a single run apart.
+    47a493f, 8930831). A sequence per anchor, kept in the state, numbers every lifetime of one id: inside one
+    run and across runs whose cursor did not move (a failed source), so no two lifetimes share a key
+    (review on a05b213).
     """
     if state.audit_anchor is None:
         return bucket
-    n = state.audit_seq[sid] = state.audit_seq.get(sid, 0) + 1
+    seq = state.audit_seq.setdefault(state.audit_anchor, {})
+    n = seq[sid] = seq.get(sid, 0) + 1
     return f'{state.audit_anchor}.{n}'
 
 

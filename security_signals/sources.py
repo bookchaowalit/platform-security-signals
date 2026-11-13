@@ -52,7 +52,7 @@ class Cloudflare:
         self.token, self.zone, self.account, self.key, self.opener = token, zone_id, account_id, key, opener
         self.truncated = 0  # full pages kept without splitting further (flood or request budget)
         self.partial = []  # [(start, end)] kept full pages: counts there are a lower bound
-        self.skipped = []  # slices left unqueried when the time budget ran out (their buckets become partial)
+        self.skipped = []  # kept for the run's interface; nothing is left unread (see _zone_rows)
 
     def _gql(self, query, variables):
         data = _post(CF_GRAPHQL, {'Authorization': f'Bearer {self.token}'}, {'query': query, 'variables': variables},
@@ -68,32 +68,55 @@ class Cloudflare:
         one request for each slice waiting in the queue plus both halves. So a flood early in the window
         cannot starve later slices (security review on 0ce442a), and nothing is skipped. A full page that
         cannot be split further is kept as is (10 000 blocks still open SIG-03), counted in `truncated` and
-        listed in `partial`, so its buckets never resolve a signal. Past CF_TIME_BUDGET seconds the slices
-        still queued are listed in `skipped` (partial too) instead of being queried (review on 8930831).
+        listed in `partial`, so its buckets never resolve a signal. Past CF_TIME_BUDGET seconds nothing more
+        is queried; a split page whose halves were not all fetched by then is kept whole instead (its rows
+        were already pulled), so a slow flood never loses rows it has read (reviews on 8930831, a05b213).
         """
-        queue, done, left = [(start, end)], [], CF_MAX_REQUESTS
+        # node id -> (start, end, parent id, rows of its own full page or None while unfetched)
+        nodes = {0: (start, end, None, None)}
+        queue, leaves, cut, left = [0], [], [], CF_MAX_REQUESTS
         deadline = self.clock() + CF_TIME_BUDGET
-        while queue:
-            if self.clock() >= deadline:  # slow answers under a flood: keep what we have, mark the rest
-                self.truncated += 1
-                self.skipped += queue
-                break
-            a, b = queue.pop(0)
+        while queue and self.clock() < deadline:
+            n = queue.pop(0)
+            a, b, parent, _ = nodes[n]
             left -= 1
             data = self._gql(query, {'z': self.zone, 'a': iso(a), 'b': iso(b), 'n': CF_LIMIT, **(extra or {})})
             zones = (data.get('viewer') or {}).get('zones') or []
             rows = zones[0].get(field) if zones else None
             if rows is None:
                 raise ProviderError('no data')
+            nodes[n] = (a, b, parent, rows)
+            if len(rows) >= CF_LIMIT and b - a > 60 and left >= len(queue) + 2:
+                mid = (a + b) // 2
+                for half in ((a, mid), (mid, b)):
+                    nodes[len(nodes)] = (*half, n, None)
+                    queue.append(len(nodes) - 1)
+                continue
             if len(rows) >= CF_LIMIT:
-                if b - a > 60 and left >= len(queue) + 2:
-                    mid = (a + b) // 2
-                    queue += [(a, mid), (mid, b)]
-                    continue
                 self.truncated += 1
-                self.partial.append((a, b))
-            done.append((a, rows))
-        return [r for _, rows in sorted(done, key=lambda d: d[0]) for r in rows]
+                cut.append(n)
+            leaves.append(n)
+        if queue:  # out of time: every split page with an unfetched half stands in for its whole range
+            self.truncated += 1
+            # The nearest fetched page above each unfetched half stands in for its range; one nested
+            # under another such page is covered by that one. Finished halves elsewhere keep their own rows.
+            nearest = {nodes[n][2] for n in queue}
+
+            def ancestors(n):
+                n = nodes[n][2]
+                while n is not None:
+                    yield n
+                    n = nodes[n][2]
+
+            top = {p for p in nearest if not any(a in nearest for a in ancestors(p))}
+
+            def under_top(n):
+                return n in top or any(a in top for a in ancestors(n))
+
+            leaves = [n for n in leaves if not under_top(n)] + sorted(top)
+            cut = [n for n in cut if not under_top(n)] + sorted(top)
+        self.partial += sorted(nodes[n][:2] for n in cut)
+        return [r for n in sorted(leaves, key=lambda n: nodes[n][0]) for r in nodes[n][3]]
 
     def firewall(self, start, end):
         q = """query($z:String!,$a:Time!,$b:Time!,$n:Int!){viewer{zones(filter:{zoneTag:$z}){

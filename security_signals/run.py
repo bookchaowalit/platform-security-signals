@@ -95,7 +95,7 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None):
         # after a lost state write gives the same audit idempotency key (reviews on 36c4ba3, 47a493f).
         # A source with no cursor yet has nothing stored to anchor to: its window start is used.
         anchor = start
-        state.audit_anchor, state.audit_seq = f'{source}:{anchor}', {}
+        state.audit_anchor = f'{source}:{anchor}'
         start = max(start, end - CATCH_UP * BUCKET)
         if start >= end:
             status[source] = 'ok'
@@ -135,6 +135,9 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None):
         resolved += r
         status[source] = 'ok'
     state.audit_anchor = None
+    # Only an anchor the next run can still use matters: the one after each source's stored cursor.
+    live = {f'{s}:{c + BUCKET}' for s, c in state.cursors.items()}
+    state.audit_seq = {a: seq for a, seq in state.audit_seq.items() if a in live}
     state.trim(end)
 
     open_count = {}
