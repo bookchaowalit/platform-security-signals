@@ -35,6 +35,7 @@ class State:
         self.acks = data.get('acks', [])
         self.audit = data.get('audit', [])  # [{change, id, at}] not yet in security-api
         self.audit_dropped = data.get('audit_dropped', 0)  # running total of events lost to MAX_AUDIT
+        self.audit_anchor, self.audit_seq = None, {}  # per run, never stored (engine._audit_at)
 
     @classmethod
     def new(cls):

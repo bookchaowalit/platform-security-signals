@@ -17,11 +17,26 @@ def _hold(rule):
     return rules.RULES[rule][1] if rule in rules.RULES else 1
 
 
+def _audit_at(state, sid, bucket):
+    """The audit identity of a new signal lifetime (R11).
+
+    Inside a run the anchor is the source's stored cursor, which a replay of the same state repeats exactly,
+    even when the 24 h catch-up window has moved and the signal would open in another bucket (reviews on
+    47a493f, 8930831). A per-run sequence keeps two lifetimes of one id in a single run apart.
+    """
+    if state.audit_anchor is None:
+        return bucket
+    n = state.audit_seq[sid] = state.audit_seq.get(sid, 0) + 1
+    return f'{state.audit_anchor}.{n}'
+
+
 def _open(state, s, bucket, opened):
     known = state.signals.get(s['id'])
     if known is None:
-        state.signals[s['id']] = {k: v for k, v in s.items() if k != 'ip'} | {'opened': bucket, 'last_active': bucket}
-        state.audit.append({'change': 'opened', 'id': s['id'], 'at': bucket})  # R11
+        at = _audit_at(state, s['id'], bucket)
+        state.signals[s['id']] = {k: v for k, v in s.items() if k != 'ip'} | {'opened': bucket, 'last_active': bucket,
+                                                                              'audit_at': at}
+        state.audit.append({'change': 'opened', 'id': s['id'], 'at': at})  # R11
         opened.append(s)
     else:
         known['last_active'] = bucket
@@ -31,10 +46,10 @@ def _open(state, s, bucket, opened):
 
 def _resolve(state, sid, resolved):
     s = state.signals.pop(sid)
-    state.audit.append({'change': 'resolved', 'id': sid, 'at': s['opened']})  # R11: `at` names this lifetime
+    state.audit.append({'change': 'resolved', 'id': sid, 'at': s.get('audit_at', s['opened'])})  # R11: this lifetime
     if sid in state.acks:
         state.acks.remove(sid)
-    resolved.append({k: v for k, v in s.items() if k not in ('opened', 'last_active')} | {'id': sid})
+    resolved.append({k: v for k, v in s.items() if k not in ('opened', 'last_active', 'audit_at')} | {'id': sid})
 
 
 def process_source(state, source, bucket_rows, baseline=False, partial=()):

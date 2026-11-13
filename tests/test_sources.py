@@ -7,6 +7,7 @@ import urllib.error
 from security_signals.sources import (
     CF_LIMIT,
     CF_MAX_REQUESTS,
+    CF_TIME_BUDGET,
     RAILWAY_LIMIT,
     Cloudflare,
     ProviderError,
@@ -65,6 +66,17 @@ class CloudflareFirewall(unittest.TestCase):
         rows = cf.firewall(T0, T0 + 60)
         self.assertEqual(sum(r['count'] for _, r in rows), CF_LIMIT)
         self.assertEqual(cf.truncated, 1)
+
+    def test_time_budget_stops_a_slow_flood_and_marks_the_rest(self):  # review P1 on 8930831
+        full = zone('firewallEventsAdaptive', [fw_row(1)] * CF_LIMIT)
+        op = FakeOpener(*[full] * 100)
+        ticks = iter(range(0, 10_000, 15))  # every clock reading is 15 s later: each answer takes 15 s
+        cf = Cloudflare('t', 'z', 'a', KEY, opener=op, clock=lambda: next(ticks))
+        cf.firewall(T0, T0 + 900)
+        self.assertLessEqual(len(op.requests), CF_TIME_BUDGET // 15 + 1)
+        self.assertTrue(cf.skipped)
+        covered = sorted(cf.partial + cf.skipped)  # what was cut or left still tiles the window
+        self.assertEqual((covered[0][0], covered[-1][1]), (T0, T0 + 900))
 
     def test_request_budget_caps_splitting(self):
         full = zone('firewallEventsAdaptive', [fw_row(1)] * CF_LIMIT)

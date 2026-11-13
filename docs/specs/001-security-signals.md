@@ -244,3 +244,9 @@ Independent Codex review and the automated security review of 817db1d found six 
   egress are shared provider ranges: allowlisting them would also hide any attacker running on Railway or
   Workers, the same reason the GitHub Actions ranges only filter `http`. Revisit only if a real false alert
   traces back to our own egress.
+- Review round on 8930831: (1) each Cloudflare collector call also stops after 60 s (`CF_TIME_BUDGET`);
+  slices still queued go to `skipped`, become partial and count as a cut, so a slow flood can no longer run
+  the 8-minute job out before state is written. (2) SIG-06 "new client" needs a client hash: token exchange
+  failures carry none and count only in the surge. (3) Every signal's audit identity is the source's
+  stored cursor plus a per-run sequence (`audit_at`), so a replay after a lost state write repeats every
+  key even when the 24 h catch-up window has moved and a signal opens in another bucket.

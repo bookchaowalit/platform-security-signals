@@ -5,6 +5,7 @@ the hash is what gets stored (R3). A provider problem raises ProviderError; the 
 that source failed (R5).
 """
 import json
+import time
 import urllib.error
 import urllib.request
 from collections import Counter
@@ -16,6 +17,9 @@ RAILWAY_GRAPHQL = 'https://backboard.railway.com/graphql/v2'
 TIMEOUT = 20  # R6
 CF_LIMIT = 10_000
 CF_MAX_REQUESTS = 24  # per collector call; past this a full page is kept as is
+# Seconds per collector call. Three Cloudflare calls (each at most this + one 20 s request) plus Railway,
+# audit (90 s) and Telegram stay inside the 8-minute job, so a flood can never stop state being written.
+CF_TIME_BUDGET = 60
 RAILWAY_LIMIT = 5_000
 ACCESS_MAX_SPAN = 7 * 86_400  # Cloudflare refuses a wider Access query (spike)
 USER_AGENT = 'platform-security-signals'
@@ -43,11 +47,12 @@ def _path_prefix(path):
 
 
 class Cloudflare:
-    def __init__(self, token, zone_id, account_id, key, opener=urllib.request.urlopen):
+    def __init__(self, token, zone_id, account_id, key, opener=urllib.request.urlopen, clock=time.monotonic):
+        self.clock = clock
         self.token, self.zone, self.account, self.key, self.opener = token, zone_id, account_id, key, opener
         self.truncated = 0  # full pages kept without splitting further (flood or request budget)
         self.partial = []  # [(start, end)] kept full pages: counts there are a lower bound
-        self.skipped = []  # kept for the run's interface; breadth-first splitting never skips a slice
+        self.skipped = []  # slices left unqueried when the time budget ran out (their buckets become partial)
 
     def _gql(self, query, variables):
         data = _post(CF_GRAPHQL, {'Authorization': f'Bearer {self.token}'}, {'query': query, 'variables': variables},
@@ -63,10 +68,16 @@ class Cloudflare:
         one request for each slice waiting in the queue plus both halves. So a flood early in the window
         cannot starve later slices (security review on 0ce442a), and nothing is skipped. A full page that
         cannot be split further is kept as is (10 000 blocks still open SIG-03), counted in `truncated` and
-        listed in `partial`, so its buckets never resolve a signal.
+        listed in `partial`, so its buckets never resolve a signal. Past CF_TIME_BUDGET seconds the slices
+        still queued are listed in `skipped` (partial too) instead of being queried (review on 8930831).
         """
         queue, done, left = [(start, end)], [], CF_MAX_REQUESTS
+        deadline = self.clock() + CF_TIME_BUDGET
         while queue:
+            if self.clock() >= deadline:  # slow answers under a flood: keep what we have, mark the rest
+                self.truncated += 1
+                self.skipped += queue
+                break
             a, b = queue.pop(0)
             left -= 1
             data = self._gql(query, {'z': self.zone, 'a': iso(a), 'b': iso(b), 'n': CF_LIMIT, **(extra or {})})

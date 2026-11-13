@@ -9,7 +9,7 @@ import unittest
 
 from security_signals.audit import AuditSink, assertion, event_target, idempotency_key
 from security_signals.model import BUCKET
-from security_signals.run import NOTIFY_FAILED, OK, run
+from security_signals.run import CATCH_UP, LAG, NOTIFY_FAILED, OK, run
 from security_signals.sources import ProviderError
 from security_signals.store import MAX_AUDIT, State
 
@@ -129,6 +129,17 @@ class Runs(unittest.TestCase):
             _, out, _, _ = run(state, later, {'http': collector(error='http 500')}, OWN, Sent())
             keys.append([idempotency_key(e) for e in State.load(out).audit])
         self.assertEqual(len(keys[0]), 1)
+        self.assertEqual(keys[0], keys[1])
+
+    def test_replay_keeps_keys_of_signals_opened_at_the_moving_window_edge(self):  # review P2 on 8930831
+        _, state, _, _ = run('', NOW, {'fw': collector()}, OWN, Sent())
+        keys = []
+        for later in (NOW + 200 * BUCKET, NOW + 201 * BUCKET):  # cursor > 24 h old: the window start moves
+            end = (later - LAG) // BUCKET * BUCKET
+            flood = collector({bk: [fw(count=300)] for bk in range(end - CATCH_UP * BUCKET, end, BUCKET)})
+            _, out, _, _ = run(state, later, {'fw': flood}, OWN, Sent())
+            keys.append(sorted(idempotency_key(e) for e in State.load(out).audit))
+        self.assertTrue(keys[0])
         self.assertEqual(keys[0], keys[1])
 
     def test_summary_reports_what_the_cap_dropped(self):  # review on 3a0c351

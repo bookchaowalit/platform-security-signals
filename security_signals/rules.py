@@ -167,7 +167,8 @@ def _sig06(state, bucket, rows):
         top = ', '.join(f'{k} {v}' for k, v in reasons.most_common(3))
         out.append(sig('SIG-06', 'identity', 'high', f'{total} failed token requests in 15 min ({top})'))
     for r in rows:
-        if r['reason'] in KNOWN_CLIENT_REASONS and not state.was_seen('idp_client', r['client_hash'], bucket):
+        # only registered clients carry a hash (identity SPEC-007); token exchange failures count in the surge only
+        if r['client_hash'] and r['reason'] in KNOWN_CLIENT_REASONS and not state.was_seen('idp_client', r['client_hash'], bucket):
             out.append(sig('SIG-06', f'client:{_short(r["client_hash"])}', 'high',
                            f'a client not seen in 30 days is failing token requests ({r["reason"]})'))
     return out
@@ -186,7 +187,7 @@ def after(state, source, bucket, rows):
                     state.mark_seen('access_device', r['device_hash'], bucket)
     elif source == 'idp':
         for r in rows:
-            if r['reason'] in KNOWN_CLIENT_REASONS:
+            if r['client_hash'] and r['reason'] in KNOWN_CLIENT_REASONS:
                 state.mark_seen('idp_client', r['client_hash'], bucket)
 
 

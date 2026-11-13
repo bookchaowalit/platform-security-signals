@@ -172,6 +172,16 @@ class Sig07Silent(unittest.TestCase):  # AC6
         self.assertEqual(opened, [])
 
 
+class Sig06EmptyHash(unittest.TestCase):  # review P2 on 8930831
+    def test_token_exchange_failures_count_in_the_surge_but_are_not_a_new_client(self):
+        s = State.new()
+        opened, _ = process_source(s, 'idp', {b(0): [idp(client='', reason='invalid_grant')]})
+        self.assertEqual(opened, [])
+        self.assertNotIn('idp_client', s.seen)
+        opened, _ = process_source(s, 'idp', {b(1): [idp(client='', reason='invalid_grant', count=25)]})
+        self.assertEqual([o['id'] for o in opened], ['SIG-06:identity'])
+
+
 class Partial(unittest.TestCase):
     def test_partial_buckets_open_but_never_resolve(self):
         s = State.new()
