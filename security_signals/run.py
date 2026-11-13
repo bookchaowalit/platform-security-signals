@@ -103,7 +103,9 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None):
             if source == 'http' and own is None:
                 raise ProviderError('github meta')
             pulled = fn(start, end)
-        except ProviderError as exc:
+        except Exception as exc:  # noqa: BLE001  one broken source must never stop the others (R5)
+            if not isinstance(exc, ProviderError):
+                exc = ProviderError(f'internal {type(exc).__name__}')
             opened += source_failed(state, source, anchor, str(exc))
             status[source] = 'failed'
             continue

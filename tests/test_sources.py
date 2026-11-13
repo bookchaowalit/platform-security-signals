@@ -136,6 +136,13 @@ class RailwayLogs(unittest.TestCase):
         rows = Railway('t', opener=FakeOpener({'data': {'environmentLogs': raw}})).identity('env', T0, T0 + 900)
         self.assertEqual(rows, [(T0, {'reason': 'invalid_client', 'client_hash': '', 'count': 1})])
 
+    def test_odd_status_values_are_skipped_not_fatal(self):  # security review on 7cd5713
+        raw = [{'timestamp': '2026-11-12T00:05:00Z', 'attributes': [{'key': 'event', 'value': '"request.completed"'},
+               {'key': 'status', 'value': v}, {'key': 'system', 'value': '"x"'}]}
+               for v in ('NaN', 'Infinity', '401.5', 'true', '{"a":1}', '"abc"', '401')]
+        rows = Railway('t', opener=FakeOpener({'data': {'environmentLogs': raw}})).gateway('env', T0, T0 + 900)
+        self.assertEqual(rows, [(T0, {'system': 'x', 'status': 401, 'count': 1})])
+
     def test_project_token_header(self):
         self.assertEqual(Railway('t', project_token=True).header, {'Project-Access-Token': 't'})
 

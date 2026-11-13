@@ -66,6 +66,18 @@ class Runs(unittest.TestCase):
         self.assertEqual(json.loads(summary)['sources'], {'access': 'off', 'bypass': 'off', 'fw': 'failed',
                                                           'gw': 'off', 'http': 'ok', 'idp': 'off'})
 
+    def test_a_crashing_collector_fails_only_its_source(self):  # security review on 7cd5713
+        def crash(start, end):
+            raise RuntimeError('bug')
+        sent = Sent()
+        _, state, _, _ = run('', NOW, {'http': collector(), 'fw': collector()}, OWN, sent)
+        code, state, _, summary = run(state, NOW + BUCKET, {'http': collector({b(200): [http(count=40)]}), 'fw': crash},
+                                      OWN, sent)
+        self.assertEqual(code, SOURCE_FAILED)
+        self.assertEqual(json.loads(summary)['sources']['fw'], 'failed')
+        self.assertIn('SIG-02', sent[-1])
+        self.assertIn('SIG-07:fw', State.load(state).signals)
+
     def test_missing_github_ranges_fail_http_only(self):
         sent = Sent()
         _, state, _, _ = run('', NOW, {'http': collector(), 'fw': collector()}, OWN, sent)

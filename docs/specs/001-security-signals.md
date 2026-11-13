@@ -229,3 +229,6 @@ Independent Codex review and the automated security review of 817db1d found six 
 - Live check: two refused requests (forged assertion, unknown grant) read back through the collector as
   `invalid_client` (hashed) and `unsupported_grant_type` (no hash) in the same bucket.
 - The `idp` and `gw` sources still need the Railway project tokens (O-7) to run in the job.
+- Security review on 7cd5713: a gateway `status` that is not an integer (NaN, Infinity, floats, objects)
+  is skipped instead of raising, JSON constants stay text, and any unexpected collector exception fails
+  only its own source (`internal <type>`, SIG-07) so one broken source can never stop the run.

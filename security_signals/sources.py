@@ -134,10 +134,14 @@ class Cloudflare:
         return out
 
 
+def _no_constant(_):
+    raise ValueError('constant')
+
+
 def _attribute(value):
     """Railway returns each parsed log attribute JSON-encoded (`\"habits\"`, `401`); plain text stays as is."""
     try:
-        decoded = json.loads(value)
+        decoded = json.loads(value, parse_constant=_no_constant)  # NaN/Infinity stay text
     except (TypeError, ValueError):
         return value
     return decoded if isinstance(decoded, (str, int, float, bool)) or decoded is None else value
@@ -177,9 +181,10 @@ class Railway:
     def gateway(self, environment_id, start, end):
         agg = Counter()
         for t, a in self.logs(environment_id, 'request.completed', start, end):
-            try:
-                status = int(a.get('status', ''))
-            except ValueError:
+            status = a.get('status')
+            if isinstance(status, str) and status.isdigit():
+                status = int(status)
+            if isinstance(status, bool) or not isinstance(status, int):  # NaN, floats, objects: not a status
                 continue
             if status >= 400:
                 agg[(bucket_of(t), a.get('system') or a.get('route') or '?', status)] += 1
