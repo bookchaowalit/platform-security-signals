@@ -21,6 +21,7 @@ def _open(state, s, bucket, opened):
     known = state.signals.get(s['id'])
     if known is None:
         state.signals[s['id']] = {k: v for k, v in s.items() if k != 'ip'} | {'opened': bucket, 'last_active': bucket}
+        state.audit.append({'change': 'opened', 'id': s['id'], 'at': bucket})  # R11
         opened.append(s)
     else:
         known['last_active'] = bucket
@@ -30,6 +31,7 @@ def _open(state, s, bucket, opened):
 
 def _resolve(state, sid, resolved):
     s = state.signals.pop(sid)
+    state.audit.append({'change': 'resolved', 'id': sid, 'at': s['opened']})  # R11: `at` names this lifetime
     if sid in state.acks:
         state.acks.remove(sid)
     resolved.append({k: v for k, v in s.items() if k not in ('opened', 'last_active')} | {'id': sid})

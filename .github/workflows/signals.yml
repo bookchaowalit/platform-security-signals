@@ -1,6 +1,7 @@
 # Security signals (docs/specs/001-security-signals.md): every 15 minutes pull new buckets from
 # Cloudflare (firewall events, gateway HTTP errors, Access logins) and Railway logs (gateway, identity),
-# evaluate SIG-00..SIG-07 and send a Telegram message only when a signal opens or resolves.
+# evaluate SIG-00..SIG-07 and send a Telegram message only when a signal opens or resolves; each
+# open/resolve is also one security-api audit event (R11).
 #
 # Started by the jobs Worker (platform-jobs-worker job `security-signals`, */15) through
 # workflow_dispatch (ADR-0008, R10). Public repository: the log prints only counts per source and
@@ -52,6 +53,7 @@ jobs:
           SIGNALS_IDP_ENV_ID: ${{ secrets.SIGNALS_IDP_ENV_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SIGNALS_IDENTITY_PRIVATE_KEY_PEM: ${{ secrets.SIGNALS_IDENTITY_PRIVATE_KEY_PEM }}
         run: |
           set +e
           python -m security_signals.r2 get state/state.json "$RUNNER_TEMP/previous.json" 2> "$RUNNER_TEMP/stderr.log"

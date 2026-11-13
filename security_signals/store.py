@@ -19,6 +19,7 @@ RETENTION = {
 }
 SEEN_RETENTION = 30 * DAY
 MAX_PENDING = 5
+MAX_AUDIT = 500  # audit events kept for the next run (R8, R11); the oldest go first
 
 
 class State:
@@ -30,6 +31,7 @@ class State:
         self.signals = data.get('signals', {})
         self.pending = data.get('pending', [])
         self.acks = data.get('acks', [])
+        self.audit = data.get('audit', [])  # [{change, id, at}] not yet in security-api
 
     @classmethod
     def new(cls):
@@ -51,7 +53,8 @@ class State:
             pending = [f'Security signals: {len(pending) - MAX_PENDING + 1} older undelivered alerts were dropped.',
                        *pending[-(MAX_PENDING - 1):]]
         return json.dumps({'version': VERSION, 'cursors': self.cursors, 'first': self.first, 'series': self.series,
-                           'seen': self.seen, 'signals': self.signals, 'pending': pending, 'acks': self.acks},
+                           'seen': self.seen, 'signals': self.signals, 'pending': pending, 'acks': self.acks,
+                           'audit': self.audit[-MAX_AUDIT:]},
                           sort_keys=True, separators=(',', ':')) + '\n'
 
     # count series -----------------------------------------------------------------------------

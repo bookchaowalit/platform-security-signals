@@ -41,13 +41,14 @@ SIGNALS_IP_KEY=… SIGNALS_CF_TOKEN=… SIGNALS_CF_ZONE_ID=… SIGNALS_CF_ACCOUN
 | `SIGNALS_GW_ENV_ID`, `SIGNALS_IDP_ENV_ID` | Railway environment ids |
 | `SIGNALS_R2_*` | R2 keys for the bucket `security-signals` only |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `HEARTBEAT_TOKEN` | alerts and heartbeat |
+| `SIGNALS_IDENTITY_PRIVATE_KEY_PEM` | private key of identity service client `security-signals` (audience `security-api`, scope `audit:write` only); without it audit events wait in the state |
 | variable `SIGNALS_KEEP_RAW_IP` | `1` keeps raw IPs under `raw-ip/` for 7 days (owner decision D-2); off by default |
 
 A source with no configuration is reported as `off` and skipped.
 
 ## Exit codes
 
-`0` ok · `2` a source or R2 failed (its signals stay open, SIG-07 opens) · `3` Telegram refused (message kept, sent next run) · `4` configuration missing.
+`0` ok · `2` a source or R2 failed (its signals stay open, SIG-07 opens) · `3` Telegram or security-api refused (message or audit event kept, sent next run) · `4` configuration missing.
 
 ## Status
 
@@ -56,7 +57,9 @@ uptime heartbeat `security-signals` (2 h). R2 bucket `security-signals` with lif
 `raw-ip/` 7 d. Sources live: `fw`, `http`, `access` (account-owned read-only Cloudflare token
 `security-signals-read`; R2 key = token `security-signals-r2`, that bucket only).
 
+Audit (R11) live since 2026-11-13: every opened or resolved signal is one `security-api` event
+`signal.opened|resolved`, target `<rule>.<subject>`, idempotency key per signal lifetime.
+
 Open: `gw` and `idp` need Railway project tokens (Railway refuses project-token creation through the
-API, so the owner creates them in the dashboard); identity `token.issue_failed` event (R9);
-`security-api` audit events (R11); `SIGNALS_SELF_IPS` holds the home address only, Railway and Worker
+API, so the owner creates them in the dashboard); identity `token.issue_failed` event (R9); `SIGNALS_SELF_IPS` holds the home address only, Railway and Worker
 egress still to add; controlled live test (AC11) and 7 quiet days (AC12).

@@ -187,3 +187,16 @@ Independent Codex review and the automated security review of 817db1d found six 
   :07 slot) and a failed run always reports; 24 writes a day instead of 96.
 - Sixth round (72a113a): SIG-07 resolves only after a complete hour with rows or a good pull and no cut
   bucket left in the 1-hour window; a clean bucket next to a cut one proves nothing.
+
+### R11 built (2026-11-13)
+
+- identity service client `security-signals` registered in identity-api `IDENTITY_SERVICE_CLIENTS_JSON`
+  (system workspace, own random subject, audience `security-api`, scope `audit:write` only; checked with
+  identity's own parser, then a redeploy of the same commit `ab9645e`). Private key (RSA 3072) and subject
+  live only in Infisical `/security-signals` and the Actions secret `SIGNALS_IDENTITY_PRIVATE_KEY_PEM`.
+- `engine` queues `{change, id, at}` in the state (`audit`, at most 500, oldest dropped) whenever a signal
+  opens or resolves; `at` is the bucket it opened in, so the idempotency key is stable across retries and a
+  reopened signal is a new event. The run posts the queue after Telegram; refused events stay and the run
+  exits 3 (R8). Local `--no-notify` runs keep the queue and post nothing.
+- Live check: a token (600 s, aud `security-api`, scope `audit:write`) and one `signal.selftest` event
+  `sig-00.wiring` were accepted through the gateway.

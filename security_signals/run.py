@@ -7,7 +7,8 @@ import time
 import urllib.request
 from pathlib import Path
 
-from .engine import process_source, source_failed
+from .audit import AuditSink, service_token
+from .engine import _resolve, process_source, source_failed
 from .model import BUCKET, DAY, SelfIPs, SelfTraffic, drop_self, iso
 from .report import message, public_summary
 from .rules import SOURCES
@@ -70,11 +71,12 @@ def bronze_files(source, bucket_rows, keep_raw_ip):
     return out
 
 
-def run(state_text, now, collectors, own, send, keep_raw_ip=False):
+def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None):
     """collectors: {source: fn(start, end) -> [(bucket, row)]}; a missing source is off.
 
     own: SelfTraffic, or None when the GitHub ranges could not be read (then `http` counts as failed,
     because SIG-02 without SIG-00 would alert on our own runners).
+    audit: AuditSink, or None (local runs): events then wait in the state for a run that has one (R11).
     Returns (exit code, new state text, bronze {key: bytes}, public summary).
     """
     state = State.load(state_text)
@@ -118,7 +120,7 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False):
             truncated[source] = cut
             opened += _capacity(state, source, end - BUCKET, cut)
         elif capacity in state.signals:
-            resolved.append(state.signals.pop(capacity) | {'id': capacity})
+            _resolve(state, capacity, resolved)
         rows_n[source] = sum(r.get('count', 1) for rs in bucket_rows.values() for r in rs)
         bronze.update(bronze_files(source, bucket_rows, keep_raw_ip))
         o, r = process_source(state, source, bucket_rows, baseline=baseline, partial=partial)
@@ -141,13 +143,18 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False):
         except Exception:  # noqa: BLE001  kept in state, retried next run (R8)
             state.pending = [keep for _, keep in queue[n:]]
             break
+    if audit:
+        state.audit = audit(state.audit)  # the ones security-api did not take stay for the next run (R8)
+    audit_failed = bool(audit and state.audit)
 
     summary = json.loads(public_summary(rows_n, status, list(state.signals.values()), opened, resolved))
     if state.pending:
         summary['alerts_pending'] = len(state.pending)
+    if state.audit:
+        summary['audit_pending'] = len(state.audit)
     if truncated:
         summary['truncated'] = truncated
-    code = SOURCE_FAILED if 'failed' in status.values() else NOTIFY_FAILED if state.pending else OK
+    code = SOURCE_FAILED if 'failed' in status.values() else NOTIFY_FAILED if state.pending or audit_failed else OK
     summary['exit'] = code
     return code, state.dump(), bronze, json.dumps(summary, sort_keys=True)
 
@@ -208,8 +215,10 @@ def main(argv=None, env=os.environ):
         return CONFIG_FAILED
     send = (lambda text: print(text, file=sys.stderr)) if args.no_notify else telegram(env)
     state_text = args.state_in.read_text() if args.state_in.exists() else ''
+    key = env.get('SIGNALS_IDENTITY_PRIVATE_KEY_PEM')
+    audit = AuditSink(lambda: service_token(key)) if key and not args.no_notify else None
     code, new_state, bronze, summary = run(state_text, time.time(), collectors_from_env(env), self_ips(env), send,
-                                           keep_raw_ip=env.get('SIGNALS_KEEP_RAW_IP') == '1')
+                                           keep_raw_ip=env.get('SIGNALS_KEEP_RAW_IP') == '1', audit=audit)
     args.state_out.write_text(new_state)
     for key, body in bronze.items():
         path = args.bronze_dir / key
