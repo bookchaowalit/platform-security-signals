@@ -200,3 +200,8 @@ Independent Codex review and the automated security review of 817db1d found six 
   exits 3 (R8). Local `--no-notify` runs keep the queue and post nothing.
 - Live check: a token (600 s, aud `security-api`, scope `audit:write`) and one `signal.selftest` event
   `sig-00.wiring` were accepted through the gateway.
+- Review round on 36c4ba3: the audit drain posts at most 100 events and spends at most 90 s per run (the
+  rest waits), so a backlog can never run the 8-minute job out before it writes state. SIG-07 for a failed
+  pull and for a capacity cut now opens in a bucket that follows the cursor (`start` / first cut bucket),
+  so a replay after a lost state write reuses the same audit idempotency key instead of a second
+  `signal.opened`.

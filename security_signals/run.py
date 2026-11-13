@@ -100,7 +100,9 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None):
                 raise ProviderError('github meta')
             pulled = fn(start, end)
         except ProviderError as exc:
-            opened += source_failed(state, source, end - BUCKET, str(exc))
+            # `start` follows the cursor, so a replay after a lost state write opens SIG-07 in the same bucket
+            # and its audit idempotency key stays the same (review on 36c4ba3)
+            opened += source_failed(state, source, start, str(exc))
             status[source] = 'failed'
             continue
         # Cut pages and skipped slices make their buckets partial: rows already pulled there are kept and
@@ -118,7 +120,7 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None):
         capacity = f'SIG-07:{source}-capacity'
         if cut:
             truncated[source] = cut
-            opened += _capacity(state, source, end - BUCKET, cut)
+            opened += _capacity(state, source, min(partial) if partial else start, cut)  # stable on replay
         elif capacity in state.signals:
             _resolve(state, capacity, resolved)
         rows_n[source] = sum(r.get('count', 1) for rs in bucket_rows.values() for r in rs)

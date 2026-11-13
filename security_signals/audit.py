@@ -24,6 +24,8 @@ SECURITY_API = 'https://gateway.bookchaowalit.com/v1/platform-security'
 CLIENT_ID = 'security-signals'
 USER_AGENT = 'security-signals/1'
 TARGET = re.compile(r'[a-z][a-z0-9_.-]{0,63}')  # security-api identifier rule
+MAX_POSTS = 100  # per run; a backlog drains over several runs, so the 8-minute job always writes its state
+POST_BUDGET = 90  # seconds per run for all posts (each call has its own 20 s timeout)
 
 
 def _b64(data):
@@ -93,18 +95,22 @@ def post_event(body, key, token):
 
 
 class AuditSink:
-    def __init__(self, token, post=post_event):
-        self.token, self.post = token, post
+    def __init__(self, token, post=post_event, clock=time.monotonic, max_posts=MAX_POSTS, budget=POST_BUDGET):
+        self.token, self.post, self.clock, self.max_posts, self.budget = token, post, clock, max_posts, budget
 
     def __call__(self, events):
-        """Post events in order; return the ones not posted (from the first failure on)."""
+        """Post events in order; return the ones not posted (from the first failure, the post cap or the
+        time budget on), so a long backlog never stops the run from writing its state (review on 36c4ba3)."""
         if not events:
             return []
         try:
             token = self.token()
         except (ProviderError, subprocess.CalledProcessError, OSError, KeyError):
             return list(events)  # identity down or the key unusable: retry next run (R8)
+        started = self.clock()
         for n, event in enumerate(events):
+            if n >= self.max_posts or self.clock() - started >= self.budget:
+                return list(events[n:])
             try:
                 self.post({'action': f'signal.{event["change"]}', 'target': event_target(event['id'])},
                           idempotency_key(event), token)

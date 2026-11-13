@@ -13,7 +13,7 @@ from security_signals.run import NOTIFY_FAILED, OK, run
 from security_signals.sources import ProviderError
 from security_signals.store import MAX_AUDIT, State
 
-from .helpers import b, http
+from .helpers import b, fw, http
 from .test_run import NOW, OWN, Sent, collector
 
 
@@ -100,6 +100,26 @@ class Runs(unittest.TestCase):
         events = [{'change': 'opened', 'id': f'SIG-03:h{n}', 'at': n} for n in range(3)]
         sink = Sink(fail_at=1)
         self.assertEqual(sink(events), events[1:])
+
+    def test_post_cap_and_time_budget_leave_the_rest_for_next_run(self):  # review P1 on 36c4ba3
+        events = [{'change': 'opened', 'id': f'SIG-03:h{n}', 'at': n} for n in range(5)]
+        posted = []
+        capped = AuditSink(lambda: 't', lambda body, key, tok: posted.append(key), max_posts=2)
+        self.assertEqual(capped(events), events[2:])
+        ticks = iter([0, 0, 50, 100, 150])  # start, then one reading per event
+        slow = AuditSink(lambda: 't', lambda body, key, tok: None, clock=lambda: next(ticks), budget=90)
+        self.assertEqual(slow(events), events[2:])
+
+    def test_replayed_run_reuses_the_capacity_and_failure_keys(self):  # review P2 on 36c4ba3
+        _, state, _, _ = run('', NOW, {'fw': collector(), 'http': collector()}, OWN, Sent())
+        keys = []
+        for later in (NOW + 2 * BUCKET, NOW + 3 * BUCKET):  # the first result is lost (bronze upload failed)
+            flood = collector({b(200): [fw(count=5)]})
+            flood.truncated, flood.partial = 1, [(b(200), b(201))]
+            _, out, _, _ = run(state, later, {'fw': flood, 'http': collector(error='http 500')}, OWN, Sent())
+            keys.append(sorted(idempotency_key(e) for e in State.load(out).audit))
+        self.assertEqual(len(keys[0]), 3)  # SIG-07 capacity, SIG-07 http failed, SIG-03 new host
+        self.assertEqual(keys[0], keys[1])
 
     def test_kept_events_are_capped(self):
         s = State.new()
