@@ -212,3 +212,6 @@ Independent Codex review and the automated security review of 817db1d found six 
 - Review round on 3a0c351: the capacity signal opens at the pull's `start` (from the stored cursor), not
   the first cut bucket, because page splits change with the window length on a replay. The audit queue is
   bounded before the run summary, so `audit_pending` / `audit_dropped` match the state that is written.
+- Review round on 47a493f: after an outage longer than 24 h the capped window start moves with the clock,
+  so SIG-07 (failed pull, capacity) is anchored to the stored cursor instead. A source with no cursor yet
+  has nothing stored to anchor to and uses its window start (a lost first state write can repeat one event).

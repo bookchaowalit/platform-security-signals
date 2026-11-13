@@ -91,6 +91,10 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None):
             continue
         cursor = state.cursors.get(source)
         start = cursor + BUCKET if cursor is not None else end - CATCH_UP * BUCKET
+        # Signal lifetimes are anchored to the stored cursor, not to the 24 h-capped window, so a replay
+        # after a lost state write gives the same audit idempotency key (reviews on 36c4ba3, 47a493f).
+        # A source with no cursor yet has nothing stored to anchor to: its window start is used.
+        anchor = start
         start = max(start, end - CATCH_UP * BUCKET)
         if start >= end:
             status[source] = 'ok'
@@ -100,9 +104,7 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None):
                 raise ProviderError('github meta')
             pulled = fn(start, end)
         except ProviderError as exc:
-            # `start` follows the cursor, so a replay after a lost state write opens SIG-07 in the same bucket
-            # and its audit idempotency key stays the same (review on 36c4ba3)
-            opened += source_failed(state, source, start, str(exc))
+            opened += source_failed(state, source, anchor, str(exc))
             status[source] = 'failed'
             continue
         # Cut pages and skipped slices make their buckets partial: rows already pulled there are kept and
@@ -120,9 +122,7 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None):
         capacity = f'SIG-07:{source}-capacity'
         if cut:
             truncated[source] = cut
-            # `start` follows the stored cursor; page splits (and so the first cut bucket) change with the
-            # window length, so they would give a replay a new audit key (review on 3a0c351)
-            opened += _capacity(state, source, start, cut)
+            opened += _capacity(state, source, anchor, cut)  # not the first cut bucket: page splits move on replay
         elif capacity in state.signals:
             _resolve(state, capacity, resolved)
         rows_n[source] = sum(r.get('count', 1) for rs in bucket_rows.values() for r in rs)

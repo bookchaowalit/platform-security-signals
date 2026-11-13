@@ -122,6 +122,15 @@ class Runs(unittest.TestCase):
         self.assertEqual(len(keys[0]), 3)  # SIG-07 capacity, SIG-07 http failed, SIG-03 new host
         self.assertEqual(keys[0], keys[1])
 
+    def test_replay_after_a_long_outage_keeps_the_key(self):  # review on 47a493f: the 24 h cap moves `start`
+        _, state, _, _ = run('', NOW, {'http': collector()}, OWN, Sent())
+        keys = []
+        for later in (NOW + 200 * BUCKET, NOW + 201 * BUCKET):  # cursor > 24 h old; first result lost
+            _, out, _, _ = run(state, later, {'http': collector(error='http 500')}, OWN, Sent())
+            keys.append([idempotency_key(e) for e in State.load(out).audit])
+        self.assertEqual(len(keys[0]), 1)
+        self.assertEqual(keys[0], keys[1])
+
     def test_summary_reports_what_the_cap_dropped(self):  # review on 3a0c351
         _, state, _, _ = run('', NOW, {'http': collector()}, OWN, Sent())
         data = json.loads(state)
