@@ -18,7 +18,7 @@ standard library only, private state in R2, alerts on change only, heartbeat to 
 | SIG-04 | Access login from a new country or device | Cloudflare Access |
 | SIG-05 | direct calls past the gateway | not wired yet (gateway enforce rollout) |
 | SIG-06 | identity token failures (≥ 20 / 15 min) or a known client failing for the first time | identity logs (`token.issue_failed`, identity SPEC-007) |
-| SIG-07 | a source failed or went quiet against its own history | all |
+| SIG-07 | a source failed, or had no rows for an hour that normally has rows (4 of the last 7 days) | all |
 
 ## Run locally
 
@@ -61,5 +61,4 @@ Audit (R11) live since 2026-11-13: every opened or resolved signal is one `secur
 `signal.opened|resolved`, target `<rule>.<subject>`, idempotency key per signal lifetime.
 
 Open: `gw` and `idp` need Railway project tokens (Railway refuses project-token creation through the
-API, so the owner creates them in the dashboard); `SIGNALS_SELF_IPS` holds the home address only, Railway and Worker
-egress still to add; controlled live test (AC11) and 7 quiet days (AC12).
+API, so the owner creates them in the dashboard); `SIGNALS_SELF_IPS` holds the home address only on purpose (see the spec, 2026-11-13); controlled live test (AC11) and 7 quiet days (AC12).

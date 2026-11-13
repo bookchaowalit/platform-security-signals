@@ -232,3 +232,15 @@ Independent Codex review and the automated security review of 817db1d found six 
 - Security review on 7cd5713: a gateway `status` that is not an integer (NaN, Infinity, floats, objects)
   is skipped instead of raising, JSON constants stay text, and any unexpected collector exception fails
   only its own source (`internal <type>`, SIG-07) so one broken source can never stop the run.
+
+### First live day (2026-11-13)
+
+- No alert came from our own traffic (no SIG-02/SIG-03 in ~33 h). SIG-07 "quiet" on `fw` opened and
+  resolved about ten times: firewall events are sparse (rows in 29 of ~130 buckets) and the rule fired when
+  the same hour had rows on *any* of the previous 7 days. It now needs rows in that hour on at least 4 of
+  the previous 7 days (`QUIET_MIN_DAYS`), so it only judges hours that are normally busy and stays silent
+  during the first 4 days of history. Pull failures still open SIG-07 at once.
+- `SIGNALS_SELF_IPS` stays the home address only. Railway (no static egress on this plan) and Workers
+  egress are shared provider ranges: allowlisting them would also hide any attacker running on Railway or
+  Workers, the same reason the GitHub Actions ranges only filter `http`. Revisit only if a real false alert
+  traces back to our own egress.

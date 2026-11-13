@@ -8,6 +8,7 @@ from collections import Counter
 from .model import BUCKET, DAY
 
 BLOCK_ACTIONS = {'block', 'challenge', 'managed_challenge', 'jschallenge', 'connectionclose'}
+QUIET_MIN_DAYS = 4  # SIG-07 quiet: the hour must normally have rows (most of the last 7 days)
 KNOWN_CLIENT_REASONS = {'invalid_grant', 'invalid_scope', 'unauthorized_client'}
 
 SIG01_MIN, SIG01_FACTOR, SIG01_WINDOW = 50, 5, 7 * DAY
@@ -191,13 +192,12 @@ def after(state, source, bucket, rows):
 
 # -- SIG-07 ---------------------------------------------------------------------------------------
 def gone_quiet(state, source, bucket):
-    """No rows for a complete hour where the same hour on any of the previous 7 days had some."""
+    """No rows for a complete hour where the same hour had rows on at least QUIET_MIN_DAYS of the previous
+    7 days. "Any day" flapped on sparse sources (firewall events: rows in 29 of 130 buckets on day one)."""
     if state.total('partial', source, bucket - 3 * BUCKET, bucket) > 0:  # an empty cut bucket proves nothing
         return False
     if state.total('src_total', source, bucket - 3 * BUCKET, bucket) > 0:
         return False
-    for d in range(1, 8):
-        shift = d * DAY * BUCKET
-        if state.total('src_total', source, bucket - 3 * BUCKET - shift, bucket - shift) > 0:
-            return True
-    return False
+    busy = sum(1 for d in range(1, 8)
+               if state.total('src_total', source, bucket - 3 * BUCKET - d * DAY * BUCKET, bucket - d * DAY * BUCKET) > 0)
+    return busy >= QUIET_MIN_DAYS

@@ -4,6 +4,7 @@ import unittest
 
 from security_signals.engine import process_source, source_failed
 from security_signals.model import SelfIPs
+from security_signals.rules import QUIET_MIN_DAYS
 from security_signals.store import State
 
 from .helpers import access, b, fw, gw, http, idp
@@ -152,13 +153,23 @@ class Sig07Silent(unittest.TestCase):  # AC6
         _, resolved = run(s, 'gw', {1: []})
         self.assertIn('SIG-07:gw', resolved)
 
+    def busy_days(self, days):
+        """`days` days where the first hour has rows, then the rest of each day empty."""
+        s, day = State.new(), 96
+        for d in range(days):
+            run(s, 'fw', {d * day + n: [fw(action='skip')] for n in range(0, 4)}, baseline=True)
+            run(s, 'fw', {d * day + n: [] for n in range(4, day)}, baseline=True)
+        return s, days * day
+
     def test_source_gone_quiet_against_its_own_history(self):
-        s = State.new()
-        day = 96
-        run(s, 'fw', {n: [fw(action='skip')] for n in range(0, 4)}, baseline=True)
-        run(s, 'fw', {n: [] for n in range(4, day)}, baseline=True)
-        opened, _ = run(s, 'fw', {n: [] for n in range(day, day + 4)})
+        s, today = self.busy_days(QUIET_MIN_DAYS)
+        opened, _ = run(s, 'fw', {n: [] for n in range(today, today + 4)})
         self.assertEqual(opened, ['SIG-07:fw'])
+
+    def test_a_sparse_source_is_not_quiet(self):  # live 2026-11-12/13: fw flapped open/resolved ~10 times
+        s, today = self.busy_days(QUIET_MIN_DAYS - 1)
+        opened, _ = run(s, 'fw', {n: [] for n in range(today, today + 4)})
+        self.assertEqual(opened, [])
 
 
 class Partial(unittest.TestCase):
