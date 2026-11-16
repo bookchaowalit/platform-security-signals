@@ -34,16 +34,15 @@ def message(opened, resolved, open_count, baseline, show_ip=True):
         return bound('\n'.join(lines))
     if not opened and not resolved:
         return None
-    head = ', '.join(f'{n} {sev}' for sev, n in sorted(open_count.items(), key=lambda kv: SEVERITY_ORDER.get(kv[0], 9)))
-    lines = [f'Security signals: changes (open: {head or "none"})']
-    if opened:
-        lines.append('\nOpened:')
-        lines += [_line(s, ICON.get(s['severity'], '•'), show_ip) for s in _sorted(opened)]
-    if resolved:
-        lines.append('\nResolved:')
-        lines += [_line(s, '✅', show_ip) for s in _sorted(resolved)]
+    head = ' · '.join(f'{ICON.get(sev, "•")} {n} {sev}'
+                      for sev, n in sorted(open_count.items(), key=lambda kv: SEVERITY_ORDER.get(kv[0], 9)))
+    changes = [_line(s, ICON.get(s['severity'], '•'), show_ip) for s in _sorted(opened)]
+    changes += [_line(s, '✅', show_ip) + ' · ปิดแล้ว' for s in _sorted(resolved)]
+    # One change reads as one line; several get a count title first.
+    lines = changes if len(changes) == 1 else [f'🛡️ Security · เปิดใหม่ {len(opened)} · ปิดแล้ว {len(resolved)}', *changes]
+    lines.append(f'เปิดค้าง: {head}' if head else 'ไม่มีเรื่องเปิดค้าง')
     if len(lines) > MAX_LINES:
-        lines = lines[:MAX_LINES] + [f'… and {len(lines) - MAX_LINES} more']
+        lines = lines[:MAX_LINES - 1] + [f'… และอีก {len(lines) - MAX_LINES + 1} บรรทัด', lines[-1]]
     return bound('\n'.join(lines))
 
 
