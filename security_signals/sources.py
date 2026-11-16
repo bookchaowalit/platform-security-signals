@@ -231,12 +231,21 @@ class Railway:
         return [(b, {'reason': reason, 'client_hash': client, 'count': n}) for (b, reason, client), n in agg.items()]
 
 
-def github_actions_ranges(opener=urllib.request.urlopen):
-    """SIG-00: GitHub Actions egress ranges from the public meta API."""
-    req = urllib.request.Request('https://api.github.com/meta', headers={'User-Agent': USER_AGENT,
-                                                                         'Accept': 'application/vnd.github+json'})
-    try:
-        with opener(req, timeout=TIMEOUT) as resp:
-            return json.load(resp).get('actions') or []
-    except (OSError, ValueError) as exc:
-        raise ProviderError(type(exc).__name__) from None
+def github_actions_ranges(opener=urllib.request.urlopen, token=None, attempts=2):
+    """SIG-00: GitHub Actions egress ranges from the public meta API.
+
+    Unauthenticated calls share the runner IP's 60/h limit and fail now and then, so the job token is
+    sent when there is one and a failed call is tried once more before giving up.
+    """
+    headers = {'User-Agent': USER_AGENT, 'Accept': 'application/vnd.github+json'}
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    error = None
+    for _ in range(attempts):
+        req = urllib.request.Request('https://api.github.com/meta', headers=headers)
+        try:
+            with opener(req, timeout=TIMEOUT) as resp:
+                return json.load(resp).get('actions') or []
+        except (OSError, ValueError) as exc:
+            error = exc
+    raise ProviderError(type(error).__name__) from None

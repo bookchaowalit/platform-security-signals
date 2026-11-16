@@ -54,6 +54,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SIGNALS_IDENTITY_PRIVATE_KEY_PEM: ${{ secrets.SIGNALS_IDENTITY_PRIVATE_KEY_PEM }}
+          # read-only job token: lifts the meta API call off the shared unauthenticated limit
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set +e
           python -m security_signals.r2 get state/state.json "$RUNNER_TEMP/previous.json" 2> "$RUNNER_TEMP/stderr.log"

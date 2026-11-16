@@ -38,6 +38,8 @@ class State:
         self.audit_anchor = None  # set per source by the run (engine._audit_at)
         # {anchor: {signal id: lifetimes numbered}}: stored, so a later run on the same cursor keeps counting
         self.audit_seq = data.get('audit_seq', {})
+        # last good GitHub Actions ranges {at: epoch s, ranges: [...]}, the fallback when the meta API fails
+        self.gh_ranges = data.get('gh_ranges')
 
     @classmethod
     def new(cls):
@@ -72,7 +74,8 @@ class State:
                        *pending[-(MAX_PENDING - 1):]]
         return json.dumps({'version': VERSION, 'cursors': self.cursors, 'first': self.first, 'series': self.series,
                            'seen': self.seen, 'signals': self.signals, 'pending': pending, 'acks': self.acks,
-                           'audit': self.audit, 'audit_dropped': self.audit_dropped, 'audit_seq': self.audit_seq},
+                           'audit': self.audit, 'audit_dropped': self.audit_dropped, 'audit_seq': self.audit_seq,
+                           **({'gh_ranges': self.gh_ranges} if self.gh_ranges else {})},
                           sort_keys=True, separators=(',', ':')) + '\n'
 
     # count series -----------------------------------------------------------------------------

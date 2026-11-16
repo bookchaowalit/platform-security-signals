@@ -71,7 +71,7 @@ def bronze_files(source, bucket_rows, keep_raw_ip):
     return out
 
 
-def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None):
+def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None, gh_ranges=None):
     """collectors: {source: fn(start, end) -> [(bucket, row)]}; a missing source is off.
 
     own: SelfTraffic, or None when the GitHub ranges could not be read (then `http` counts as failed,
@@ -82,6 +82,8 @@ def run(state_text, now, collectors, own, send, keep_raw_ip=False, audit=None):
     state = State.load(state_text)
     baseline = state is None
     state = state or State.new()
+    if gh_ranges is not None:
+        state.gh_ranges = gh_ranges
     end = (int(now) - LAG) // BUCKET * BUCKET
     opened, resolved, bronze, rows_n, status, truncated = [], [], {}, {}, {}, {}
     for source in SOURCES:
@@ -208,13 +210,31 @@ def collectors_from_env(env):
     return out  # 'bypass' has no collector in v1 (fed by WS3 later)
 
 
-def self_ips(env):
+RANGES_MAX_AGE = 7 * 86400  # the Actions ranges change a few times a year; a week-old copy is still good
+
+
+def cached_ranges(state_text):
     try:
-        ranges = github_actions_ranges()
-    except ProviderError:
+        data = json.loads(state_text) if state_text and state_text.strip() else {}
+    except ValueError:
         return None
+    cache = data.get('gh_ranges')
+    return cache if isinstance(cache, dict) and isinstance(cache.get('ranges'), list) else None
+
+
+def self_ips(env, cache=None, now=None, fetch=github_actions_ranges):
+    """(SelfTraffic or None, cache to store). A failed meta call falls back to the last good ranges
+    (at most RANGES_MAX_AGE old), so one refused request no longer fails the `http` source."""
+    now = time.time() if now is None else now
+    try:
+        ranges = fetch(token=env.get('GITHUB_TOKEN') or None)
+        cache = {'at': int(now), 'ranges': ranges}
+    except ProviderError:
+        if not cache or now - cache.get('at', 0) > RANGES_MAX_AGE:
+            return None, cache
+        ranges = cache['ranges']
     explicit = [a for a in env.get('SIGNALS_SELF_IPS', '').replace('\n', ',').split(',') if a.strip()]
-    return SelfTraffic(SelfIPs([], explicit), SelfIPs(ranges))
+    return SelfTraffic(SelfIPs([], explicit), SelfIPs(ranges)), cache
 
 
 def main(argv=None, env=os.environ):
@@ -231,8 +251,10 @@ def main(argv=None, env=os.environ):
     state_text = args.state_in.read_text() if args.state_in.exists() else ''
     key = env.get('SIGNALS_IDENTITY_PRIVATE_KEY_PEM')
     audit = AuditSink(lambda: service_token(key)) if key and not args.no_notify else None
-    code, new_state, bronze, summary = run(state_text, time.time(), collectors_from_env(env), self_ips(env), send,
-                                           keep_raw_ip=env.get('SIGNALS_KEEP_RAW_IP') == '1', audit=audit)
+    own, gh_ranges = self_ips(env, cached_ranges(state_text))
+    code, new_state, bronze, summary = run(state_text, time.time(), collectors_from_env(env), own, send,
+                                           keep_raw_ip=env.get('SIGNALS_KEEP_RAW_IP') == '1', audit=audit,
+                                           gh_ranges=gh_ranges)
     args.state_out.write_text(new_state)
     for key, body in bronze.items():
         path = args.bronze_dir / key
