@@ -178,6 +178,23 @@ class Sig07Silent(unittest.TestCase):  # AC6
         _, resolved = run(s, 'fw', {today + 29: [fw(action='skip')]})
         self.assertIn('SIG-07:fw', resolved)
 
+    def test_a_silence_merged_into_a_failed_pull_still_needs_rows(self):  # security review on 54223ca
+        s, today = self.busy_days(QUIET_MIN_DAYS)
+        source_failed(s, 'fw', b(today), 'HTTPError')
+        run(s, 'fw', {n: [] for n in range(today + 1, today + 25)})  # then 6 h of silence
+        self.assertEqual(s.signals['SIG-07:fw']['cause'], 'quiet')
+        process_source(s, 'fw', {b(today + 25): []}, partial={b(today + 25)})  # 6 h window now unjudgeable
+        _, resolved = run(s, 'fw', {n: [] for n in range(today + 26, today + 30)})
+        self.assertNotIn('SIG-07:fw', resolved)
+
+    def test_a_signal_without_a_cause_fails_closed(self):
+        s, today = self.busy_days(QUIET_MIN_DAYS)
+        run(s, 'fw', {n: [] for n in range(today, today + 24)})
+        s.signals['SIG-07:fw'].pop('cause')  # stored before causes existed
+        process_source(s, 'fw', {b(today + 24): []}, partial={b(today + 24)})
+        _, resolved = run(s, 'fw', {n: [] for n in range(today + 25, today + 29)})
+        self.assertNotIn('SIG-07:fw', resolved)
+
     def test_an_empty_hour_of_firewall_events_is_not_quiet(self):  # live 2026-11-16: flapped every hour or two
         s, today = self.busy_days(QUIET_MIN_DAYS)
         run(s, 'fw', {today: [fw(action='skip')]})  # a burst, then under 6 h of silence

@@ -45,6 +45,8 @@ def _open(state, s, bucket, opened):
         known['last_active'] = bucket
         if s['severity'] != known['severity']:
             known['severity'] = s['severity']
+        if s.get('cause') == 'quiet':  # a silence merged into a failed-pull SIG-07 still needs rows to end
+            known['cause'] = 'quiet'
 
 
 def _resolve(state, sid, resolved):
@@ -93,7 +95,8 @@ def process_source(state, source, bucket_rows, baseline=False, partial=()):
         # with any complete good hour, rows or not.
         rows_back = state.total('src_total', source, bucket - 3 * BUCKET, bucket) > 0
         open_sig = state.signals.get(sig07)
-        needs_rows = bool(open_sig) and open_sig.get('cause') == 'quiet'
+        # Fail closed: only a SIG-07 known to come from a failed pull ends without rows (older ones carry no cause).
+        needs_rows = bool(open_sig) and open_sig.get('cause') != 'failed'
         if not quiet and window_complete and open_sig and (rows_back or not needs_rows):
             _resolve(state, sig07, resolved)
         rules.after(state, source, bucket, rows)
@@ -104,5 +107,7 @@ def process_source(state, source, bucket_rows, baseline=False, partial=()):
 def source_failed(state, source, bucket, error_kind):
     """The pull failed: keep the source's signals and cursor (R5), open SIG-07 once."""
     opened = []
-    _open(state, rules.sig('SIG-07', source, SIG07_SEVERITY, f'{source} ดึงข้อมูลไม่สำเร็จ ({error_kind})'), bucket, opened)
+    failed = rules.sig('SIG-07', source, SIG07_SEVERITY, f'{source} ดึงข้อมูลไม่สำเร็จ ({error_kind})')
+    failed['cause'] = 'failed'
+    _open(state, failed, bucket, opened)
     return opened
