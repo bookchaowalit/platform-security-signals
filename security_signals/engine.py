@@ -73,7 +73,8 @@ def process_source(state, source, bucket_rows, baseline=False, partial=()):
         state.put('partial', source, bucket, 1 if cut else 0)  # kept across runs for the 1-hour window
         quiet = not baseline and not cut and rules.gone_quiet(state, source, bucket)
         if quiet:
-            active.append(rules.sig('SIG-07', source, SIG07_SEVERITY, f'{source} has had no rows for 1 h'))
+            hours = rules.quiet_buckets(source) // 4
+            active.append(rules.sig('SIG-07', source, SIG07_SEVERITY, f'{source} ไม่มีข้อมูลเกิน {hours} ชม.'))
         for s in active:
             _open(state, s, bucket, opened)
         for sid, s in list(state.signals.items()):
@@ -95,5 +96,5 @@ def process_source(state, source, bucket_rows, baseline=False, partial=()):
 def source_failed(state, source, bucket, error_kind):
     """The pull failed: keep the source's signals and cursor (R5), open SIG-07 once."""
     opened = []
-    _open(state, rules.sig('SIG-07', source, SIG07_SEVERITY, f'{source} pull failed ({error_kind})'), bucket, opened)
+    _open(state, rules.sig('SIG-07', source, SIG07_SEVERITY, f'{source} ดึงข้อมูลไม่สำเร็จ ({error_kind})'), bucket, opened)
     return opened
