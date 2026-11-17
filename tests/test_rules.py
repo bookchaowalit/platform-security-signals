@@ -167,6 +167,17 @@ class Sig07Silent(unittest.TestCase):  # AC6
         self.assertEqual(opened, ['SIG-07:fw'])
         self.assertEqual(s.signals['SIG-07:fw']['detail'], 'fw ไม่มีข้อมูลเกิน 6 ชม.')
 
+    def test_a_silence_ends_only_when_rows_come_back(self):  # security review on 8fa3461
+        s, today = self.busy_days(QUIET_MIN_DAYS)
+        run(s, 'fw', {n: [] for n in range(today, today + 24)})
+        self.assertIn('SIG-07:fw', s.signals)
+        # A cut bucket makes the 6 h window unjudgeable, then a complete empty hour: still silent.
+        process_source(s, 'fw', {b(today + 24): []}, partial={b(today + 24)})
+        _, resolved = run(s, 'fw', {n: [] for n in range(today + 25, today + 29)})
+        self.assertNotIn('SIG-07:fw', resolved)
+        _, resolved = run(s, 'fw', {today + 29: [fw(action='skip')]})
+        self.assertIn('SIG-07:fw', resolved)
+
     def test_an_empty_hour_of_firewall_events_is_not_quiet(self):  # live 2026-11-16: flapped every hour or two
         s, today = self.busy_days(QUIET_MIN_DAYS)
         run(s, 'fw', {today: [fw(action='skip')]})  # a burst, then under 6 h of silence

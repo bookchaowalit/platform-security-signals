@@ -74,7 +74,9 @@ def process_source(state, source, bucket_rows, baseline=False, partial=()):
         quiet = not baseline and not cut and rules.gone_quiet(state, source, bucket)
         if quiet:
             hours = rules.quiet_buckets(source) // 4
-            active.append(rules.sig('SIG-07', source, SIG07_SEVERITY, f'{source} ไม่มีข้อมูลเกิน {hours} ชม.'))
+            silent = rules.sig('SIG-07', source, SIG07_SEVERITY, f'{source} ไม่มีข้อมูลเกิน {hours} ชม.')
+            silent['cause'] = 'quiet'
+            active.append(silent)
         for s in active:
             _open(state, s, bucket, opened)
         for sid, s in list(state.signals.items()):
@@ -86,8 +88,14 @@ def process_source(state, source, bucket_rows, baseline=False, partial=()):
                 _resolve(state, sid, resolved)
         sig07 = f'SIG-07:{source}'
         window_complete = state.total('partial', source, bucket - 3 * BUCKET, bucket) == 0
-        if not quiet and window_complete and sig07 in state.signals:
-            _resolve(state, sig07, resolved)  # a complete good hour ends it; a cut one proves nothing
+        # A silence ends only when rows came back in a complete hour: "not quiet" alone can also mean a
+        # cut bucket inside the longer quiet window (fw 6 h), which proves nothing. A failed pull ends
+        # with any complete good hour, rows or not.
+        rows_back = state.total('src_total', source, bucket - 3 * BUCKET, bucket) > 0
+        open_sig = state.signals.get(sig07)
+        needs_rows = bool(open_sig) and open_sig.get('cause') == 'quiet'
+        if not quiet and window_complete and open_sig and (rows_back or not needs_rows):
+            _resolve(state, sig07, resolved)
         rules.after(state, source, bucket, rows)
         state.cursors[source] = bucket
     return opened, resolved
