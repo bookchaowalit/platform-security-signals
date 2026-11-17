@@ -8,7 +8,16 @@ from collections import Counter
 from .model import BUCKET, DAY
 
 BLOCK_ACTIONS = {'block', 'challenge', 'managed_challenge', 'jschallenge', 'connectionclose'}
-QUIET_MIN_DAYS = 4  # SIG-07 quiet: the hour must normally have rows (most of the last 7 days)
+QUIET_MIN_DAYS = 4
+# SIG-07 quiet window per source, in 15-minute buckets (default 1 h). Firewall events are sparse
+# (WAF blocks come in bursts), so an empty hour flapped open/resolved several times a day
+# (2026-11-16); fw needs 6 empty hours.
+QUIET_BUCKETS = {'fw': 24}
+QUIET_DEFAULT_BUCKETS = 4
+
+
+def quiet_buckets(source):
+    return QUIET_BUCKETS.get(source, QUIET_DEFAULT_BUCKETS)  # SIG-07 quiet: the hour must normally have rows (most of the last 7 days)
 KNOWN_CLIENT_REASONS = {'invalid_grant', 'invalid_scope', 'unauthorized_client'}
 
 SIG01_MIN, SIG01_FACTOR, SIG01_WINDOW = 50, 5, 7 * DAY
@@ -193,12 +202,14 @@ def after(state, source, bucket, rows):
 
 # -- SIG-07 ---------------------------------------------------------------------------------------
 def gone_quiet(state, source, bucket):
-    """No rows for a complete hour where the same hour had rows on at least QUIET_MIN_DAYS of the previous
-    7 days. "Any day" flapped on sparse sources (firewall events: rows in 29 of 130 buckets on day one)."""
-    if state.total('partial', source, bucket - 3 * BUCKET, bucket) > 0:  # an empty cut bucket proves nothing
+    """No rows for a complete quiet window (quiet_buckets: 1 h, fw 6 h) where the same window had rows on
+    at least QUIET_MIN_DAYS of the previous 7 days. "Any day" flapped on sparse sources (firewall events:
+    rows in 29 of 130 buckets on day one)."""
+    span = (quiet_buckets(source) - 1) * BUCKET
+    if state.total('partial', source, bucket - span, bucket) > 0:  # an empty cut bucket proves nothing
         return False
-    if state.total('src_total', source, bucket - 3 * BUCKET, bucket) > 0:
+    if state.total('src_total', source, bucket - span, bucket) > 0:
         return False
     busy = sum(1 for d in range(1, 8)
-               if state.total('src_total', source, bucket - 3 * BUCKET - d * DAY * BUCKET, bucket - d * DAY * BUCKET) > 0)
+               if state.total('src_total', source, bucket - span - d * DAY * BUCKET, bucket - d * DAY * BUCKET) > 0)
     return busy >= QUIET_MIN_DAYS

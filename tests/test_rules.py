@@ -163,12 +163,19 @@ class Sig07Silent(unittest.TestCase):  # AC6
 
     def test_source_gone_quiet_against_its_own_history(self):
         s, today = self.busy_days(QUIET_MIN_DAYS)
-        opened, _ = run(s, 'fw', {n: [] for n in range(today, today + 4)})
+        opened, _ = run(s, 'fw', {n: [] for n in range(today, today + 24)})
         self.assertEqual(opened, ['SIG-07:fw'])
+        self.assertEqual(s.signals['SIG-07:fw']['detail'], 'fw ไม่มีข้อมูลเกิน 6 ชม.')
+
+    def test_an_empty_hour_of_firewall_events_is_not_quiet(self):  # live 2026-11-16: flapped every hour or two
+        s, today = self.busy_days(QUIET_MIN_DAYS)
+        run(s, 'fw', {today: [fw(action='skip')]})  # a burst, then under 6 h of silence
+        opened, _ = run(s, 'fw', {n: [] for n in range(today + 1, today + 24)})
+        self.assertEqual(opened, [])
 
     def test_a_sparse_source_is_not_quiet(self):  # live 2026-11-12/13: fw flapped open/resolved ~10 times
         s, today = self.busy_days(QUIET_MIN_DAYS - 1)
-        opened, _ = run(s, 'fw', {n: [] for n in range(today, today + 4)})
+        opened, _ = run(s, 'fw', {n: [] for n in range(today, today + 24)})
         self.assertEqual(opened, [])
 
 
