@@ -20,4 +20,4 @@ jobs:
       test-command: python -m unittest discover -s tests -t . -v
 
   security:
-    uses: bookchaowalit/platform-ci-workflows/.github/workflows/security.yml@b9957cccb3cc202e9e1a08df01924b8270d796df # v1.6.3
+    uses: bookchaowalit/platform-ci-workflows/.github/workflows/security.yml@493a7f5c322219e61245cf17f1fa34de2c35a22b # v1.6.6
