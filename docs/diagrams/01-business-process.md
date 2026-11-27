@@ -14,29 +14,36 @@ flowchart TD
   CFG -->|"SIGNALS_CF_TOKEN set"| CF["Cloudflare GraphQL: fw (firewall), http (gateway 4xx), access (logins)"]
   CFG -->|"Railway token + env id set"| RW["Railway environmentLogs: gw (gateway), idp (token.issue_failed)"]
   CFG -->|"not set"| OFF["source reported off, skipped"]
-  CF --> SELF["SIG-00: drop self IPs (SIGNALS_SELF_IPS; GitHub Actions ranges only for http)"]
-  RW --> SELF
-  SELF --> HASH["HMAC IP / device / client hashes; new 15-min buckets since cursor (max 24 h)"]
+  CF -->|"fw"| SELFFW["SIG-00 fw: drop SIGNALS_SELF_IPS only"]
+  CF -->|"http"| SELFHTTP["SIG-00 http: drop SIGNALS_SELF_IPS + GitHub Actions ranges"]
+  CF -->|"access: never filtered (SIG-04)"| HASH
+  RW -->|"gw, idp: no IP filter"| HASH
+  SELFFW --> HASH
+  SELFHTTP --> HASH["HMAC IP / device / client hashes; new 15-min buckets since cursor (max 24 h)"]
   HASH --> RULES["rules SIG-01..SIG-04, SIG-06, SIG-07 (SIG-05 has no collector)"]
-  RULES --> DIFF{"signal opened or resolved?"}
-  DIFF -->|no| SUM["counts-only step summary"]
-  DIFF -->|yes| TG["Telegram message (raw IP only for SIG-02/SIG-04)"]
-  TG --> AUD["security-api /v1/audit signal.opened / resolved (client_credentials, audit:write)"]
-  AUD --> SUM
-  SUM --> PUT["r2 put-dir bronze/, then put state only if all bronze landed"]
+  RULES --> DIFF{"message this run? (first run baseline, or a signal opened / resolved)"}
+  DIFF -->|no| QUEUE
+  DIFF -->|yes| TG["new Telegram message (raw IP only for SIG-02/SIG-04)"]
+  TG --> QUEUE["send pending messages from state first, then the new one"]
+  QUEUE -->|"all sent"| AUD
+  QUEUE -->|"refused"| KEEP["unsent kept in state.pending as copy without raw IP, exit 3, retried next run"]
+  KEEP --> AUD["if audit sink set: send queued audit events to security-api /v1/audit (client_credentials, audit:write); rejected stay queued, exit 3"]
+  AUD --> SUM["counts-only step summary; exit 2 if any source failed, else 3 if alert/audit pending, else 0"]
+  SUM --> PUT["r2 put-dir bronze/, then put state only if all bronze landed (R2 write fail = exit 2)"]
   PUT --> HB["heartbeat to uptime Worker (hourly if ok, always if failed)"]
-  TG -->|"refused"| KEEP["kept in state, exit 3, sent next run"]
-  KEEP --> PUT
 ```
 
-Sources: `.github/workflows/signals.yml`, `security_signals/run.py` (`run`, `collectors_from_env`, `self_ips`), `security_signals/sources.py` (`Cloudflare`, `Railway`), `security_signals/rules.py`, `security_signals/engine.py`, `security_signals/audit.py`, `security_signals/r2.py`, `README.md` §Status
+Sources: `.github/workflows/signals.yml`, `security_signals/run.py` (`run`, `collectors_from_env`, `self_ips`), `security_signals/model.py` (`SelfTraffic`), `security_signals/report.py` (`message`), `security_signals/sources.py` (`Cloudflare`, `Railway`), `security_signals/rules.py`, `security_signals/engine.py`, `security_signals/audit.py`, `security_signals/r2.py`, `README.md` §Status
 
 ข้อเท็จจริงจากโค้ด:
 
 - `collectors_from_env` ไม่มี collector ของ `bypass` (SIG-05) ใน v1 (`# 'bypass' has no collector in v1 (fed by WS3 later)`) กฎ `_sig05` มีแล้วแต่ไม่มีข้อมูลเข้า
 - `gw` และ `idp` รันเฉพาะเมื่อมี Railway token และ environment id; README §Status บอกว่ายังรอ project tokens จาก owner ว่า production ใช้ account token แทนอยู่หรือไม่ [ต้องยืนยัน]
 - state เก็บเป็นไฟล์เดียว `state/state.json` (ตาม `signals.yml`) ไม่ใช่สามไฟล์ตาม §Storage layout ของ spec
-- exit code: `0` ok, `2` source หรือ R2 ล้ม, `3` Telegram หรือ security-api ปฏิเสธ, `4` config ขาด
+- exit code: `0` ok, `2` source หรือ R2 ล้ม, `3` Telegram หรือ security-api ปฏิเสธ, `4` config ขาด; ถ้า source ล้มพร้อมกับ Telegram/audit ล้มในรอบเดียวกัน ได้ `2` (ลำดับใน `run()`) แต่รายการที่ส่งไม่ได้ยังค้างใน state และ workflow เปลี่ยนเป็น `2` เมื่อเขียน R2 ล้ม (`signals.yml`)
+- SIG-00 ใช้ allowlist ต่างกันตาม source (`SelfTraffic.for_source`): `fw` ใช้แค่ `SIGNALS_SELF_IPS`, `http` ใช้ `SIGNALS_SELF_IPS` รวมช่วง GitHub Actions, `access` / `gw` / `idp` ไม่กรอง
+- รอบแรก (ยังไม่มี state) ส่งข้อความ baseline เสมอ; ข้อความที่ค้างใน `state.pending` ถูกส่งซ้ำทุกรอบแม้ไม่มี signal เปลี่ยน และสำเนาที่เก็บไว้สร้างด้วย `show_ip=False` จึงไม่มี raw IP
+- คิว audit ถูกส่งทุกรอบที่มี audit sink ไม่ว่า Telegram จะสำเร็จหรือไม่ (`AuditSink` มีเมื่อมี `SIGNALS_IDENTITY_PRIVATE_KEY_PEM` และไม่ใช่ `--no-notify`)
 
 ## To-Be (`docs/specs/001-security-signals.md`, status draft-for-review)
 
@@ -67,7 +74,7 @@ Sources: `docs/specs/001-security-signals.md` (§Sources, §Rules, R1, R10, R11,
 |---|---|---|---|---|
 | G1 | SIG-05 (gateway bypass) มีกฎแต่ไม่มี collector → ป้อนข้อมูลจาก gateway enforce rollout (WS3) | blocked | claude | `security_signals/run.py` `collectors_from_env`; `README.md` §Rules SIG-05 "not wired yet" |
 | G2 | source `gw` และ `idp` ยังไม่มี Railway project tokens → project tokens ต่อ project (R1, O-7) | blocked | owner | `README.md` §Status "Open"; spec §Open items O-7 |
-| G3 | ยังไม่ได้ทำ live test แบบควบคุม → AC11 ผ่าน (SIG-02 และ SIG-03 เข้า Telegram ภายใน 30 นาที แล้วปิดเอง) | todo | owner | spec AC11; `README.md` §Status |
+| G3 | ยังไม่ได้ทำ live test แบบควบคุม → AC11 ผ่าน (SIG-02 เข้า Telegram ภายใน 30 นาที, SIG-03 เปิด แล้วทั้งคู่ปิดเอง) | todo | owner | spec AC11; `README.md` §Status |
 | G4 | ยังไม่มีหลักฐาน 7 วันเงียบ → AC12: heartbeat ok 7 วัน, false alert ไม่เกิน 1 ต่อวัน | doing | claude | spec AC12, §First live day (2026-11-13) |
 | G5 | D-2 (เก็บ raw IP 7 วันหรือ hash อย่างเดียว) ยังเป็น open item; variable `SIGNALS_KEEP_RAW_IP` ปิดเป็นค่าเริ่มต้น → owner ตัดสิน | decide | owner | spec §Open items D-2; `README.md` §Configuration |
 | G6 | spec ยังเป็น `draft-for-review` → owner อนุมัติ spec | decide | owner | `docs/specs/001-security-signals.md` front matter |
