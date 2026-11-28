@@ -76,8 +76,8 @@ Sources: `docs/specs/001-security-signals.md` (§Sources, §Rules, R1, R10, R11,
 | G2 | source `gw` และ `idp` ยังไม่มี Railway project tokens → project tokens ต่อ project (R1, O-7) | blocked | owner | `README.md` §Status "Open"; spec §Open items O-7 |
 | G3 | ยังไม่ได้ทำ live test แบบควบคุม → AC11 ผ่าน (SIG-02 เข้า Telegram ภายใน 30 นาที, SIG-03 เปิด แล้วทั้งคู่ปิดเอง) | todo | owner | spec AC11; `README.md` §Status |
 | G4 | ยังไม่มีหลักฐาน 7 วันเงียบ → AC12: heartbeat ok 7 วัน, false alert ไม่เกิน 1 ต่อวัน | doing | claude | spec AC12, §First live day (2026-11-13) |
-| G5 | D-2 (เก็บ raw IP 7 วันหรือ hash อย่างเดียว) ยังเป็น open item; variable `SIGNALS_KEEP_RAW_IP` ปิดเป็นค่าเริ่มต้น → owner ตัดสิน | decide | owner | spec §Open items D-2; `README.md` §Configuration |
-| G6 | spec ยังเป็น `draft-for-review` → owner อนุมัติ spec | decide | owner | `docs/specs/001-security-signals.md` front matter |
+| G5 | D-2 owner ตัดสิน 2026-11-28: เก็บ hash อย่างเดียว ไม่เก็บ raw IP; variable `SIGNALS_KEEP_RAW_IP` ไม่ได้ตั้งใน repo (ตรวจ 2026-11-28) จึงเป็นค่าเริ่มต้นที่ปิดอยู่แล้ว | done | owner | spec §Open items D-2; `README.md` §Configuration |
+| G6 | spec ยังเป็น `draft-for-review` → owner อนุมัติ spec; owner ตัดสิน 2026-11-28: อนุมัติ spec (D-2 = hash อย่างเดียว); front matter เป็น `approved` แล้ว | done | owner | `docs/specs/001-security-signals.md` front matter |
 | G7 | spec §Storage layout บอก `cursors.json`, `signals.json`, `baselines.json` แต่โค้ดใช้ `state/state.json` ไฟล์เดียว → spec ตรงกับโค้ด | todo | claude | `.github/workflows/signals.yml`; spec §Storage layout |
 
 ## Open questions

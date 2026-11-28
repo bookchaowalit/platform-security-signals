@@ -1,6 +1,7 @@
 ---
 title: "SPEC-001 Security signals: attack detection on the edge, gateway and identity"
-status: draft-for-review
+status: approved
+approved: 2026-11-28 (owner)
 created: 2026-11-12
 owner: bookchaowalit
 plan: knowledge store plans/security-gaps/PLAN.md (WS2)
@@ -135,7 +136,7 @@ GitHub signals (phase B), homelab logs (phase C), any always-on service, SIEM or
 ## Open items
 
 - O-6 Cloudflare read-only token, O-7 Railway project tokens (owner).
-- D-2 keep raw IPs 7 days (recommended) or hashes only.
+- D-2 decided 2026-11-28 (owner): hashes only. Raw IPs are not kept; leave `SIGNALS_KEEP_RAW_IP` unset.
 - Thresholds are first guesses from one day of data; tune after the 7-day run (AC12) and record changes here.
 
 ## Changes during build (2026-11-12)

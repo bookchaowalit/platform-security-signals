@@ -42,7 +42,7 @@ SIGNALS_IP_KEY=… SIGNALS_CF_TOKEN=… SIGNALS_CF_ZONE_ID=… SIGNALS_CF_ACCOUN
 | `SIGNALS_R2_*` | R2 keys for the bucket `security-signals` only |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `HEARTBEAT_TOKEN` | alerts and heartbeat |
 | `SIGNALS_IDENTITY_PRIVATE_KEY_PEM` | private key of identity service client `security-signals` (audience `security-api`, scope `audit:write` only); without it audit events wait in the state |
-| variable `SIGNALS_KEEP_RAW_IP` | `1` keeps raw IPs under `raw-ip/` for 7 days (owner decision D-2); off by default |
+| variable `SIGNALS_KEEP_RAW_IP` | `1` keeps raw IPs under `raw-ip/` for 7 days (owner decision D-2, 2026-11-28: hashes only, so leave it unset); off by default |
 
 A source with no configuration is reported as `off` and skipped.
 
