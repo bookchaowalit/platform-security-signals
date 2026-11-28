@@ -45,7 +45,7 @@ Sources: `.github/workflows/signals.yml`, `security_signals/run.py` (`run`, `col
 - รอบแรก (ยังไม่มี state) ส่งข้อความ baseline เสมอ; ข้อความที่ค้างใน `state.pending` ถูกส่งซ้ำทุกรอบแม้ไม่มี signal เปลี่ยน และสำเนาที่เก็บไว้สร้างด้วย `show_ip=False` จึงไม่มี raw IP
 - คิว audit ถูกส่งทุกรอบที่มี audit sink ไม่ว่า Telegram จะสำเร็จหรือไม่ (`AuditSink` มีเมื่อมี `SIGNALS_IDENTITY_PRIVATE_KEY_PEM` และไม่ใช่ `--no-notify`)
 
-## To-Be (`docs/specs/001-security-signals.md`, status draft-for-review)
+## To-Be (`docs/specs/001-security-signals.md`, approved 2026-11-28)
 
 ```mermaid
 flowchart TD
@@ -79,6 +79,10 @@ Sources: `docs/specs/001-security-signals.md` (§Sources, §Rules, R1, R10, R11,
 | G5 | D-2 owner ตัดสิน 2026-11-28: เก็บ hash อย่างเดียว ไม่เก็บ raw IP; variable `SIGNALS_KEEP_RAW_IP` ไม่ได้ตั้งใน repo (ตรวจ 2026-11-28) จึงเป็นค่าเริ่มต้นที่ปิดอยู่แล้ว | done | owner | spec §Open items D-2; `README.md` §Configuration |
 | G6 | spec ยังเป็น `draft-for-review` → owner อนุมัติ spec; owner ตัดสิน 2026-11-28: อนุมัติ spec (D-2 = hash อย่างเดียว); front matter เป็น `approved` แล้ว | done | owner | `docs/specs/001-security-signals.md` front matter |
 | G7 | spec §Storage layout บอก `cursors.json`, `signals.json`, `baselines.json` แต่โค้ดใช้ `state/state.json` ไฟล์เดียว → spec ตรงกับโค้ด | todo | claude | `.github/workflows/signals.yml`; spec §Storage layout |
+| G8 | To-Be ส่งทุกแหล่งผ่าน SIG-00 แต่ spec หลังรีวิวแยกขอบเขต: `fw` ใช้ `SIGNALS_SELF_IPS` เท่านั้น ช่วง IP ของ GitHub Actions ใช้กับ `http` เท่านั้น → แยกตามแหล่ง (Codex review 2026-11-28, จดไว้แทนการวาดใหม่ตามที่ owner สั่ง) | todo | claude | spec §Changes after review 2026-11-12 |
+| G9 | To-Be ทาง `no` ข้าม Telegram และ audit ทำให้ข้อความหรือ audit ที่ค้างจากรอบก่อนไม่ถูกส่งซ้ำ → ให้ส่งคิวค้างทุกรอบ (Codex review 2026-11-28, จดไว้แทนการวาดใหม่ตามที่ owner สั่ง) | todo | claude | spec R4/R5; `security_signals/run.py` |
+| G10 | As-Is ไม่มีทางเมื่ออ่าน state จาก R2 ไม่สำเร็จ (error ที่ไม่ใช่ 404 ทำให้ไม่รัน collectors) → เพิ่มทางนี้ (Codex review 2026-11-28, จดไว้แทนการวาดใหม่ตามที่ owner สั่ง) | todo | claude | `.github/workflows/signals.yml:61-68` |
+| G11 | ป้าย summary บอกว่า audit ค้างได้ exit `3` แต่ถ้าไม่ได้ตั้ง `SIGNALS_IDENTITY_PRIVATE_KEY_PEM` จะได้ `audit_pending` และ exit `0` → เขียนให้ตรง (Codex review 2026-11-28, จดไว้แทนการวาดใหม่ตามที่ owner สั่ง) | todo | claude | `security_signals/run.py:159-175` |
 
 ## Open questions
 
