@@ -136,7 +136,7 @@ GitHub signals (phase B), homelab logs (phase C), any always-on service, SIEM or
 ## Open items
 
 - O-6 Cloudflare read-only token, O-7 Railway project tokens (owner).
-- D-2 decided 2026-11-28 (owner): hashes only. Raw IPs are not kept; leave `SIGNALS_KEEP_RAW_IP` unset.
+- D-2 decided 2026-11-28 (owner): hashes only. Raw IPs are not written to R2 (`raw-ip/`); leave `SIGNALS_KEEP_RAW_IP` unset. Telegram messages for SIG-02/SIG-04 still show the raw IP (R3), so it stays in the chat history.
 - Thresholds are first guesses from one day of data; tune after the 7-day run (AC12) and record changes here.
 
 ## Changes during build (2026-11-12)

@@ -76,13 +76,15 @@ Sources: `docs/specs/001-security-signals.md` (§Sources, §Rules, R1, R10, R11,
 | G2 | source `gw` และ `idp` ยังไม่มี Railway project tokens → project tokens ต่อ project (R1, O-7) | blocked | owner | `README.md` §Status "Open"; spec §Open items O-7 |
 | G3 | ยังไม่ได้ทำ live test แบบควบคุม → AC11 ผ่าน (SIG-02 เข้า Telegram ภายใน 30 นาที, SIG-03 เปิด แล้วทั้งคู่ปิดเอง) | todo | owner | spec AC11; `README.md` §Status |
 | G4 | ยังไม่มีหลักฐาน 7 วันเงียบ → AC12: heartbeat ok 7 วัน, false alert ไม่เกิน 1 ต่อวัน | doing | claude | spec AC12, §First live day (2026-11-13) |
-| G5 | D-2 owner ตัดสิน 2026-11-28: เก็บ hash อย่างเดียว ไม่เก็บ raw IP; variable `SIGNALS_KEEP_RAW_IP` ไม่ได้ตั้งใน repo (ตรวจ 2026-11-28) จึงเป็นค่าเริ่มต้นที่ปิดอยู่แล้ว | done | owner | spec §Open items D-2; `README.md` §Configuration |
+| G5 | D-2 owner ตัดสิน 2026-11-28: เก็บ hash อย่างเดียว ไม่เขียน raw IP ลง R2 (`raw-ip/`) แต่ข้อความ Telegram ของ SIG-02/SIG-04 ยังแสดง raw IP ตาม R3; variable `SIGNALS_KEEP_RAW_IP` ไม่ได้ตั้งใน repo (ตรวจ 2026-11-28) จึงเป็นค่าเริ่มต้นที่ปิดอยู่แล้ว | done | owner | spec §Open items D-2; `README.md` §Configuration |
 | G6 | spec ยังเป็น `draft-for-review` → owner อนุมัติ spec; owner ตัดสิน 2026-11-28: อนุมัติ spec (D-2 = hash อย่างเดียว); front matter เป็น `approved` แล้ว | done | owner | `docs/specs/001-security-signals.md` front matter |
 | G7 | spec §Storage layout บอก `cursors.json`, `signals.json`, `baselines.json` แต่โค้ดใช้ `state/state.json` ไฟล์เดียว → spec ตรงกับโค้ด | todo | claude | `.github/workflows/signals.yml`; spec §Storage layout |
 | G8 | To-Be ส่งทุกแหล่งผ่าน SIG-00 แต่ spec หลังรีวิวแยกขอบเขต: `fw` ใช้ `SIGNALS_SELF_IPS` เท่านั้น ช่วง IP ของ GitHub Actions ใช้กับ `http` เท่านั้น → แยกตามแหล่ง (Codex review 2026-11-28, จดไว้แทนการวาดใหม่ตามที่ owner สั่ง) | todo | claude | spec §Changes after review 2026-11-12 |
 | G9 | To-Be ทาง `no` ข้าม Telegram และ audit ทำให้ข้อความหรือ audit ที่ค้างจากรอบก่อนไม่ถูกส่งซ้ำ → ให้ส่งคิวค้างทุกรอบ (Codex review 2026-11-28, จดไว้แทนการวาดใหม่ตามที่ owner สั่ง) | todo | claude | spec R4/R5; `security_signals/run.py` |
 | G10 | As-Is ไม่มีทางเมื่ออ่าน state จาก R2 ไม่สำเร็จ (error ที่ไม่ใช่ 404 ทำให้ไม่รัน collectors) → เพิ่มทางนี้ (Codex review 2026-11-28, จดไว้แทนการวาดใหม่ตามที่ owner สั่ง) | todo | claude | `.github/workflows/signals.yml:61-68` |
 | G11 | ป้าย summary บอกว่า audit ค้างได้ exit `3` แต่ถ้าไม่ได้ตั้ง `SIGNALS_IDENTITY_PRIVATE_KEY_PEM` จะได้ `audit_pending` และ exit `0` → เขียนให้ตรง (Codex review 2026-11-28, จดไว้แทนการวาดใหม่ตามที่ owner สั่ง) | todo | claude | `security_signals/run.py:159-175` |
+| G12 | As-Is แสดงว่า `http` และ `fw` กรอง IP ของเราเสมอ แต่ถ้า GitHub Meta API ล้มและไม่มีแคชอายุ ≤ 7 วัน `http` ถูกนับว่าล้ม ส่วน `fw` ดึงต่อโดยไม่กรอง → เพิ่มทางนี้ (Codex review 2026-11-28, จดไว้แทนการวาดใหม่ตามที่ owner สั่ง) | todo | claude | `security_signals/run.py:105-121,225-237` |
+| G13 | ทาง `OFF` (ไม่ได้ตั้ง collector ใดเลย) จบก่อน summary และ heartbeat แต่จริง ๆ `run()` ยังทำต่อและอาจรายงาน `ok: true` → เขียนให้ตรง (Codex review 2026-11-28, จดไว้แทนการวาดใหม่ตามที่ owner สั่ง) | todo | claude | `security_signals/run.py:89-93,145-175` |
 
 ## Open questions
 
